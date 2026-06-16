@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Building2, User, Shield, Key, CreditCard, Bell, Users,
   CheckCircle, AlertCircle, Save, Upload, ExternalLink, Zap, Loader2
@@ -44,9 +44,27 @@ function FieldRow({ label, value, mono, editable }) {
 
 export default function Settings() {
   const [activeSection, setActiveSection] = useState('empresa');
-  const { status: authStatus, loading: authLoading, refresh: refreshAuth } = useAuthStatus();
+  const [netlifyConfig, setNetlifyConfig] = useState({ loading: true, data: null, error: null });
   const [uploadState, setUploadState] = useState({ loading: false, error: null, success: false });
   const [uploadPassword, setUploadPassword] = useState('');
+
+  // Fetch Netlify Function configuration
+  useEffect(() => {
+    if (activeSection === 'sat') {
+      setNetlifyConfig(prev => ({ ...prev, loading: true }));
+      // Using a hardcoded RFC for demo, ideally this comes from the user context
+      fetch('/.netlify/functions/sat-config?rfc=GTE210401AB3')
+        .then(res => res.json())
+        .then(data => {
+          if (data.error) throw new Error(data.message);
+          setNetlifyConfig({ loading: false, data, error: null });
+        })
+        .catch(err => {
+          console.error(err);
+          setNetlifyConfig({ loading: false, data: null, error: err.message });
+        });
+    }
+  }, [activeSection]);
 
   const sections = [
     { id: 'empresa', label: 'Empresa', icon: <Building2 size={16} /> },
@@ -113,10 +131,29 @@ export default function Settings() {
 
           {activeSection === 'sat' && (
             <SettingSection icon={<Shield size={16} style={{ color: '#10B981' }} />} title="Certificado de Sello Digital (CSD) / e.firma">
-              {/* Status banner — uses real auth status from backend */}
+              {/* Status banner — uses real auth status from Netlify Function */}
               {(() => {
-                const isVigente = authStatus?.initialized || companySettings.certificado_sat.vigente;
-                const expiration = authStatus?.certificateExpiration || companySettings.certificado_sat.vencimiento;
+                if (netlifyConfig.loading) {
+                  return (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 'var(--sp-4)', color: 'var(--text-tertiary)' }}>
+                      <Loader2 size={16} className="spin-icon" /> Verificando configuración en Supabase...
+                    </div>
+                  );
+                }
+
+                if (netlifyConfig.error) {
+                  return (
+                    <div style={{ padding: 'var(--sp-4)', background: 'var(--danger-bg)', color: 'var(--danger-text)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--sp-5)' }}>
+                      <AlertCircle size={16} style={{ display: 'inline', marginRight: 8 }} />
+                      Hubo un problema consultando la configuración: {netlifyConfig.error}
+                    </div>
+                  );
+                }
+
+                const config = netlifyConfig.data;
+                const isVigente = config?.cer_configurado && config?.key_configurado;
+                const expiration = config?.fecha_vencimiento;
+                
                 return (
                   <div style={{
                     display: 'flex', alignItems: 'center', gap: 'var(--sp-3)',
@@ -134,18 +171,17 @@ export default function Settings() {
                         {isVigente ? 'Certificado vigente y activo' : 'Certificado no configurado'}
                       </div>
                       <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginTop: 2 }}>
-                        {expiration ? `Vence: ${typeof expiration === 'string' && expiration.includes('T') ? expiration.split('T')[0] : expiration}` : 'Sube tu e.firma para conectar con el SAT'}
+                        {isVigente && expiration ? `Vence: ${expiration.split('T')[0]}` : 'Sube tu e.firma para conectar con el SAT'}
                       </div>
                     </div>
                   </div>
                 );
               })()}
 
-              <FieldRow label="RFC asociado" value={authStatus?.rfc || companySettings.rfc} mono />
-              <FieldRow label="Serie del certificado" value={authStatus?.certificateSerial || companySettings.certificado_sat.serie} mono />
-              <FieldRow label="Fecha de vencimiento" value={authStatus?.certificateExpiration?.split('T')[0] || companySettings.certificado_sat.vencimiento} />
-              <FieldRow label="Archivos .cer configurado" value={authStatus?.cerFileExists ? '✅ Sí' : '❌ No'} />
-              <FieldRow label="Archivos .key configurado" value={authStatus?.keyFileExists ? '✅ Sí' : '❌ No'} />
+              <FieldRow label="RFC asociado" value={netlifyConfig.data?.rfc || 'No configurado'} mono />
+              <FieldRow label="Fecha de vencimiento" value={netlifyConfig.data?.fecha_vencimiento?.split('T')[0] || '—'} />
+              <FieldRow label="Archivos .cer configurado" value={netlifyConfig.data?.cer_configurado ? '✅ Sí' : '❌ No'} />
+              <FieldRow label="Archivos .key configurado" value={netlifyConfig.data?.key_configurado ? '✅ Sí' : '❌ No'} />
 
               {/* Upload form */}
               <div style={{ marginTop: 'var(--sp-5)', background: 'var(--bg-surface-2)', borderRadius: 'var(--radius-md)', padding: 'var(--sp-5)' }}>
