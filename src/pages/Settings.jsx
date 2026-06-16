@@ -234,10 +234,45 @@ export default function Settings() {
                         if (!uploadPassword) {
                           throw new Error('Ingresa la contraseña de la e.firma');
                         }
-                        await satApi.uploadEfirma(cerInput.files[0], keyInput.files[0], uploadPassword);
+
+                        // Convertir archivos físicos a Base64 en el navegador
+                        const fileToBase64 = (file) => new Promise((resolve, reject) => {
+                          const reader = new FileReader();
+                          reader.readAsDataURL(file);
+                          reader.onload = () => resolve(reader.result.split(',')[1]); // Extraer solo la data sin prefijo
+                          reader.onerror = error => reject(error);
+                        });
+
+                        const cer_base64 = await fileToBase64(cerInput.files[0]);
+                        const key_base64 = await fileToBase64(keyInput.files[0]);
+
+                        // Enviar JSON puro a la Netlify Function
+                        const response = await fetch('/.netlify/functions/upload-efirma', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            cer_base64,
+                            key_base64,
+                            password: uploadPassword,
+                            user_id: '00000000-0000-0000-0000-000000000000' // Simulación de Auth de Supabase
+                          })
+                        });
+
+                        const result = await response.json();
+                        
+                        if (!response.ok || result.error) {
+                          throw new Error(result.message || 'Error al validar la e.firma');
+                        }
+
+                        // Actualizar UI reactivamente con los datos verificados del servidor
+                        setNetlifyConfig({ loading: false, error: null, data: result });
                         setUploadState({ loading: false, error: null, success: true });
                         setUploadPassword('');
-                        refreshAuth();
+                        
+                        // Limpiar inputs
+                        cerInput.value = '';
+                        keyInput.value = '';
+
                       } catch (err) {
                         setUploadState({ loading: false, error: err.message, success: false });
                       }
