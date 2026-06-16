@@ -5,6 +5,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { resolveCredentialContent } from '../utils/credentialLoader.js';
 
 /**
  * SatService — Manages authentication and communication with the SAT
@@ -47,37 +48,26 @@ export class SatService {
   }
 
   /**
-   * Load e.firma credentials from disk.
-   * @param {string} cerPath - Path to .cer file
-   * @param {string} keyPath - Path to .key file
+   * Load e.firma credentials dynamically (from path or Base64 string).
+   * @param {string} cerEnvValue - .cer path or Base64 content
+   * @param {string} keyEnvValue - .key path or Base64 content
    * @param {string} password - Password for the .key file
    * @returns {object} FIEL credential object
    */
-  async loadCredentials(cerPath, keyPath, password) {
+  async loadCredentials(cerEnvValue, keyEnvValue, password) {
     await this._loadModules();
 
     if (!this._credentialsModule) {
       throw new Error('Módulo @nodecfdi/credentials no disponible. Ejecuta: cd server && npm install');
     }
 
-    const resolvedCer = path.resolve(cerPath);
-    const resolvedKey = path.resolve(keyPath);
-
-    // Validate files exist
-    if (!fs.existsSync(resolvedCer)) {
-      throw new Error(`Archivo de certificado no encontrado: ${resolvedCer}`);
-    }
-    if (!fs.existsSync(resolvedKey)) {
-      throw new Error(`Archivo de llave privada no encontrado: ${resolvedKey}`);
-    }
+    // Usar la utilidad híbrida para leer localmente o parsear Base64
+    const cerContent = resolveCredentialContent(cerEnvValue, '.cer');
+    const keyContent = resolveCredentialContent(keyEnvValue, '.key');
 
     const { Credential } = this._credentialsModule;
 
-    // Read certificate and key as binary
-    const cerContent = fs.readFileSync(resolvedCer);
-    const keyContent = fs.readFileSync(resolvedKey);
-
-    // Create credential from DER-encoded files (as delivered by SAT)
+    // Create credential from DER-encoded Buffer (as delivered by SAT)
     const credential = Credential.openFiles(
       cerContent.toString('binary'),
       keyContent.toString('binary'),
