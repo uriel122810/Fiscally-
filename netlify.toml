@@ -3,16 +3,36 @@
   publish = "dist"
   functions = "netlify/functions"
 
+# -- Endpoints de API Mapeados Explícitamente --
+
+[[redirects]]
+  from = "/api/health"
+  to = "/.netlify/functions/health"
+  status = 200
+
 [[redirects]]
   from = "/api/sat/download/request"
   to = "/.netlify/functions/sat-download-request"
   status = 200
 
 [[redirects]]
+  from = "/api/sat/cfdi/stats"
+  to = "/.netlify/functions/cfdi-stats"
+  status = 200
+
+[[redirects]]
+  from = "/api/sat/cfdi"
+  to = "/.netlify/functions/cfdi"
+  status = 200
+
+# -- Catch-all general para cualquier otra API (redirige limpio al manejador dinámico) --
+[[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
 
+# -- Fallback para Single Page Application (Vite/React) --
+# IMPORTANTE: Esto debe ir al final para no comerse las rutas /api/
 [[redirects]]
   from = "/*"
   to = "/index.html"
