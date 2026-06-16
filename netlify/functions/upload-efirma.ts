@@ -1,40 +1,101 @@
 import { createClient } from '@supabase/supabase-js';
 import { Credential } from '@nodecfdi/credentials';
+import Busboy from 'busboy';
 
 export const handler = async (event: any, context: any) => {
-  // CORS Headers requeridos
+  // CORS Headers
   const headers = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Content-Type': 'application/json',
   };
 
-  if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 200, headers, body: '' };
+  }
 
   try {
     if (event.httpMethod !== 'POST') {
-      throw new Error('Método no permitido. Solo se acepta POST.');
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({ success: false, error: 'Método no permitido. Solo se acepta POST.' })
+      };
     }
 
     if (!event.body) {
-      throw new Error('Cuerpo de la petición vacío.');
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({ success: false, error: 'Cuerpo de la petición vacío.' })
+      };
     }
 
-    const { cer_base64, key_base64, password, user_id } = JSON.parse(event.body);
-
-    if (!cer_base64 || !key_base64 || !password) {
-      throw new Error('Faltan datos requeridos (cer_base64, key_base64, o password).');
+    const contentType = event.headers['content-type'] || event.headers['Content-Type'];
+    if (!contentType || !contentType.includes('multipart/form-data')) {
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({ success: false, error: 'El Content-Type debe ser multipart/form-data.' })
+      };
     }
 
-    // 1. Validar y transformar Base64 a Buffer
-    const cerBuffer = Buffer.from(cer_base64, 'base64');
-    const keyBuffer = Buffer.from(key_base64, 'base64');
+    // 1. Parsear multipart/form-data con busboy
+    const parseMultipart = () => new Promise<{ fields: Record<string, string>, files: Record<string, Buffer> }>((resolve, reject) => {
+      const fields: Record<string, string> = {};
+      const files: Record<string, Buffer> = {};
 
-    if (cerBuffer.length === 0 || keyBuffer.length === 0) {
-      throw new Error('Los archivos enviados están vacíos o corruptos.');
+      const busboy = Busboy({ headers: { 'content-type': contentType } });
+
+      busboy.on('file', (name, file, info) => {
+        const chunks: Buffer[] = [];
+        file.on('data', (data) => chunks.push(data));
+        file.on('end', () => {
+          files[name] = Buffer.concat(chunks);
+        });
+      });
+
+      busboy.on('field', (name, val) => {
+        fields[name] = val;
+      });
+
+      busboy.on('finish', () => {
+        resolve({ fields, files });
+      });
+
+      busboy.on('error', (err) => {
+        reject(err);
+      });
+
+      // En Netlify Functions / AWS Lambda, el event.body para binarios suele estar en base64
+      // o como string literal si no fue codificado, usamos la bandera isBase64Encoded
+      const buffer = event.isBase64Encoded 
+        ? Buffer.from(event.body, 'base64') 
+        : Buffer.from(event.body);
+
+      busboy.end(buffer);
+    });
+
+    const { fields, files } = await parseMultipart();
+
+    const cerBuffer = files.cer;
+    const keyBuffer = files.key;
+    const password = fields.password;
+    const user_id = fields.user_id; // Puede ser enviado en el FormData
+
+    if (!cerBuffer || !keyBuffer || !password) {
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({ success: false, error: 'Faltan archivos (.cer, .key) o la contraseña.' })
+      };
     }
 
-    // 2. Desencriptar y Extraer con NodeCFDI
+    // 2. Conversión automática en el Servidor a Base64
+    const cer_base64 = cerBuffer.toString('base64');
+    const key_base64 = keyBuffer.toString('base64');
+
+    // Extraer datos con NodeCFDI
     let rfc, serie_certificado, fecha_vencimiento;
     try {
       const credential = Credential.openFiles(
@@ -47,20 +108,30 @@ export const handler = async (event: any, context: any) => {
       serie_certificado = credential.certificate().serialNumber().bytes();
       fecha_vencimiento = credential.certificate().validTo().toISOString();
     } catch (parseError: any) {
-      throw new Error(`Contraseña incorrecta o llaves inválidas: ${parseError.message}`);
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({ success: false, error: 'Contraseña incorrecta o certificado inválido' })
+      };
     }
 
-    // 3. Opcional: Persistir buffers en Netlify Blobs en producción
-    // En tu arquitectura, ya habías migrado a Blobs ('fiscally-sat-credentials').
-    // Para simplificar esta migración, aquí los almacenamos también allí por consistencia,
-    // o simplemente actualizamos Supabase.
-    // Usaremos Supabase obligatoriamente.
-    
+    // 3. Sincronización Blindada con Supabase y Blobs
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_ANON_KEY;
     const uid = user_id || '00000000-0000-0000-0000-000000000000';
 
     if (supabaseUrl && supabaseKey) {
+      // Guardar de forma segura en Netlify Blobs
+      try {
+        const { getStore } = await import('@netlify/blobs');
+        const store = getStore('fiscally-sat-credentials');
+        await store.set('cer_data', cer_base64);
+        await store.set('key_data', key_base64);
+      } catch (blobErr: any) {
+        console.warn('Advertencia: No se pudo guardar en Netlify Blobs.', blobErr.message);
+      }
+
+      // Upsert en la base de datos de Supabase
       const supabase = createClient(supabaseUrl, supabaseKey);
       
       const { error: upsertError } = await supabase
@@ -74,42 +145,36 @@ export const handler = async (event: any, context: any) => {
           fecha_vencimiento
         }, { onConflict: 'user_id' });
 
-      if (upsertError) throw new Error(`Error guardando en BD: ${upsertError.message}`);
-      
-      // NOTA: Para una integración perfecta (como mencionas "evitar límites de Netlify"),
-      // Idealmente, se guardan las llaves en los Blobs aquí mismo si es producción, 
-      // para que sat-config.ts los pueda leer.
-      try {
-        const { getStore } = await import('@netlify/blobs');
-        const store = getStore('fiscally-sat-credentials');
-        await store.set('cer_data', cer_base64);
-        await store.set('key_data', key_base64);
-      } catch (blobErr) {
-        console.warn('Advertencia: No se pudo actualizar Netlify Blobs.', blobErr.message);
+      if (upsertError) {
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({ success: false, error: `Error sincronizando base de datos: ${upsertError.message}` })
+        };
       }
+    } else {
+       console.warn("Faltan credenciales de Supabase en el entorno.");
     }
 
-    // 4. Formato Estricto de Respuesta para la UI
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
-        rfc,
+        success: true,
         cer_configurado: true,
-        key_configurado: true,
-        fecha_vencimiento,
-        status: 'configurado'
+        key_configurado: true
       })
     };
 
   } catch (error: any) {
-    console.error('[Upload e.firma Error]', error.message);
+    // 4. Manejo Absoluto de Errores: Nunca lanzar excepción del sistema (Evitar el 502)
+    console.error('[Upload e.firma Error Global]', error);
     return {
-      statusCode: 400,
+      statusCode: 200,
       headers,
       body: JSON.stringify({
-        error: true,
-        message: error.message
+        success: false,
+        error: 'Ocurrió un error interno al procesar los archivos.'
       })
     };
   }
