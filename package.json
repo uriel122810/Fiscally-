@@ -10,6 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@netlify/blobs": "^10.7.9",
+    "@nodecfdi/credentials": "^2.0.3",
     "@supabase/supabase-js": "^2.108.2",
     "lucide-react": "^1.18.0",
     "react": "^19.2.6",
