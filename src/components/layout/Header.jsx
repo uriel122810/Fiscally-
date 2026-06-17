@@ -37,9 +37,54 @@ export default function Header({ activePage, userEmail }) {
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  const handleSync = () => {
+  const shortName = userEmail ? userEmail.split('@')[0] : 'Usuario';
+  const initial = shortName.charAt(0).toUpperCase();
+
+  const handleSync = async () => {
     setSyncing(true);
-    setTimeout(() => setSyncing(false), 2500);
+    try {
+      // 1. Obtener sesión actual de forma segura
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Debes iniciar sesión para sincronizar.");
+
+      // 2. Consulta rápida a Supabase para obtener las llaves en Base64
+      const { data: configData, error: dbError } = await supabase
+        .from('configuracion_sat')
+        .select('cer_base64, key_base64')
+        .eq('user_id', session.user.id)
+        .maybeSingle();
+
+      if (dbError) throw dbError;
+      if (!configData || !configData.cer_base64 || !configData.key_base64) {
+        throw new Error("No tienes tu e.firma configurada en tu panel.");
+      }
+
+      // 3. Petición POST al backend enviando JSON limpio
+      const response = await fetch('/api/sat/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          user_id: session.user.id,
+          cer_base64: configData.cer_base64,
+          key_base64: configData.key_base64
+        })
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || 'Fallo en la sincronización del SAT');
+      }
+
+      // Podrías poner aquí un estado de éxito visual, usamos alert por simplicidad
+      alert(`✅ Sincronización exitosa: ${result.message || 'CFDIs actualizados'}`);
+    } catch (err) {
+      console.error("[Sync Error]", err);
+      alert(`❌ Error al sincronizar: ${err.message}`);
+    } finally {
+      setSyncing(false);
+    }
   };
 
   // Close on outside click
@@ -150,8 +195,8 @@ export default function Header({ activePage, userEmail }) {
               onClick={() => setShowUserMenu(!showUserMenu)}
               style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer' }}
             >
-              <div className="avatar" style={{ width: 32, height: 32, fontSize: '0.65rem' }}>
-                {userEmail ? userEmail.substring(0, 2).toUpperCase() : 'US'}
+              <div className="avatar" style={{ width: 32, height: 32, fontSize: '0.9rem', fontWeight: 600 }}>
+                {initial}
               </div>
             </button>
 
@@ -166,7 +211,10 @@ export default function Header({ activePage, userEmail }) {
                 <div style={{ padding: 'var(--sp-3)', borderBottom: '1px solid var(--border)', marginBottom: 'var(--sp-2)' }}>
                   <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', fontWeight: 600 }}>Cuentas</div>
                   <div style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--text-primary)', wordBreak: 'break-all' }}>
-                    {userEmail || 'Usuario'}
+                    {shortName}
+                  </div>
+                  <div style={{ fontSize: '0.65rem', color: 'var(--text-tertiary)', marginTop: 2 }}>
+                    {userEmail}
                   </div>
                 </div>
                 
