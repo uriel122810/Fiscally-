@@ -52,7 +52,7 @@ export const handler = async (event, context) => {
       .from('configuracion_sat')
       .select('cer_base64, key_base64')
       .eq('user_id', user_id)
-      .single();
+      .maybeSingle();
 
     if (dbError || !configData || !configData.cer_base64 || !configData.key_base64) {
       return {

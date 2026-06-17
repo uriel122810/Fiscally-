@@ -52,22 +52,29 @@ export default function Settings() {
   const fetchSupabaseConfig = async () => {
     setNetlifyConfig(prev => ({ ...prev, loading: true }));
     try {
-      const { createClient } = await import('@supabase/supabase-js');
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'TU_SUPABASE_URL';
-      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'TU_ANON_KEY';
-      const supabase = createClient(supabaseUrl, supabaseKey);
+      const { supabase } = await import('../api/supabaseClient');
+      
+      if (!supabase) {
+        throw new Error("El cliente de Supabase no pudo inicializarse por falta de variables de entorno.");
+      }
 
       // Usando UUID de prueba (en prod: supabase.auth.getUser())
       const userId = '00000000-0000-0000-0000-000000000000'; 
+
+      // 1. Control estricto: abortar si el userId es nulo o indefinido
+      if (!userId || userId === 'undefined' || userId === 'null') {
+        throw new Error('Usuario no autenticado o ID inválido. No se puede consultar Supabase.');
+      }
       
+      // 3. Sintaxis limpia usando .maybeSingle() para evitar el error HTTP 406 (Not Acceptable)
       const { data, error } = await supabase
         .from('configuracion_sat')
-        .select('*')
+        .select('rfc, fecha_vencimiento, cer_configurado, key_configurado')
         .eq('user_id', userId)
-        .single();
+        .maybeSingle();
 
-      if (error && error.code !== 'PGRST116') {
-        throw new Error(error.message);
+      if (error) {
+        throw new Error(`Error BD: ${error.message}`);
       }
       
       setNetlifyConfig({ loading: false, data: data || {}, error: null });
