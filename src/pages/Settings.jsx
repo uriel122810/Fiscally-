@@ -246,26 +246,40 @@ export default function Settings() {
                         const cer_base64 = await fileToBase64(cerInput.files[0]);
                         const key_base64 = await fileToBase64(keyInput.files[0]);
 
-                        // Enviar JSON puro a la Netlify Function
-                        const response = await fetch('/.netlify/functions/upload-efirma', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            cer_base64,
-                            key_base64,
-                            password: uploadPassword,
-                            user_id: '00000000-0000-0000-0000-000000000000' // Simulación de Auth de Supabase
-                          })
-                        });
+                        // Enviar directo a Supabase usando el SDK en el Frontend
+                        // Asegúrate de tener VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en tu .env
+                        const { createClient } = await import('@supabase/supabase-js');
+                        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'TU_SUPABASE_URL';
+                        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'TU_ANON_KEY';
+                        const supabase = createClient(supabaseUrl, supabaseKey);
 
-                        const result = await response.json();
-                        
-                        if (!response.ok || result.error) {
-                          throw new Error(result.message || 'Error al validar la e.firma');
+                        // NOTA: Para producción, user_id debería venir del contexto de autenticación:
+                        // const { data: { user } } = await supabase.auth.getUser();
+                        // const userId = user.id;
+                        const userId = '00000000-0000-0000-0000-000000000000';
+
+                        const { data, error: upsertError } = await supabase
+                          .from('configuracion_sat')
+                          .upsert({
+                            user_id: userId,
+                            cer_base64: cer_base64,
+                            key_base64: key_base64,
+                            cer_configurado: true,
+                            key_configurado: true,
+                            // Opcionalmente, extraer RFC del certificado en el backend luego o pedirlo aquí
+                          }, { onConflict: 'user_id' })
+                          .select();
+
+                        if (upsertError) {
+                          throw new Error(`Error sincronizando con Supabase: ${upsertError.message}`);
                         }
 
-                        // Actualizar UI reactivamente con los datos verificados del servidor
-                        setNetlifyConfig({ loading: false, error: null, data: result });
+                        // Actualizar UI reactivamente con los datos guardados
+                        setNetlifyConfig({ loading: false, error: null, data: {
+                          cer_configurado: true,
+                          key_configurado: true,
+                          // rfc, etc. (se pueden actualizar con otra Cloud Function luego)
+                        } });
                         setUploadState({ loading: false, error: null, success: true });
                         setUploadPassword('');
                         
