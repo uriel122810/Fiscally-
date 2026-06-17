@@ -48,21 +48,38 @@ export default function Settings() {
   const [uploadState, setUploadState] = useState({ loading: false, error: null, success: false });
   const [uploadPassword, setUploadPassword] = useState('');
 
-  // Fetch Netlify Function configuration
+  // Sincronizar configuración directamente desde Supabase
+  const fetchSupabaseConfig = async () => {
+    setNetlifyConfig(prev => ({ ...prev, loading: true }));
+    try {
+      const { createClient } = await import('@supabase/supabase-js');
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'TU_SUPABASE_URL';
+      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'TU_ANON_KEY';
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      // Usando UUID de prueba (en prod: supabase.auth.getUser())
+      const userId = '00000000-0000-0000-0000-000000000000'; 
+      
+      const { data, error } = await supabase
+        .from('configuracion_sat')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        throw new Error(error.message);
+      }
+      
+      setNetlifyConfig({ loading: false, data: data || {}, error: null });
+    } catch (err) {
+      console.error(err);
+      setNetlifyConfig({ loading: false, data: null, error: err.message });
+    }
+  };
+
   useEffect(() => {
     if (activeSection === 'sat') {
-      setNetlifyConfig(prev => ({ ...prev, loading: true }));
-      // Using a hardcoded RFC for demo, ideally this comes from the user context
-      fetch('/.netlify/functions/sat-config?rfc=GTE210401AB3')
-        .then(res => res.json())
-        .then(data => {
-          if (data.error) throw new Error(data.message);
-          setNetlifyConfig({ loading: false, data, error: null });
-        })
-        .catch(err => {
-          console.error(err);
-          setNetlifyConfig({ loading: false, data: null, error: err.message });
-        });
+      fetchSupabaseConfig();
     }
   }, [activeSection]);
 
@@ -183,122 +200,15 @@ export default function Settings() {
               <FieldRow label="Archivos .cer configurado" value={netlifyConfig.data?.cer_configurado ? '✅ Sí' : '❌ No'} />
               <FieldRow label="Archivos .key configurado" value={netlifyConfig.data?.key_configurado ? '✅ Sí' : '❌ No'} />
 
-              {/* Upload form */}
-              <div style={{ marginTop: 'var(--sp-5)', background: 'var(--bg-surface-2)', borderRadius: 'var(--radius-md)', padding: 'var(--sp-5)' }}>
-                <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, marginBottom: 'var(--sp-3)' }}>Subir e.firma (FIEL)</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-3)', marginBottom: 'var(--sp-3)' }}>
-                  <div>
-                    <label style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--text-tertiary)', display: 'block', marginBottom: 4 }}>Certificado (.cer)</label>
-                    <input type="file" accept=".cer" id="cer-upload" style={{ fontSize: 'var(--text-xs)' }} />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--text-tertiary)', display: 'block', marginBottom: 4 }}>Llave privada (.key)</label>
-                    <input type="file" accept=".key" id="key-upload" style={{ fontSize: 'var(--text-xs)' }} />
-                  </div>
-                </div>
-                <div style={{ marginBottom: 'var(--sp-3)' }}>
-                  <label style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--text-tertiary)', display: 'block', marginBottom: 4 }}>Contraseña de la e.firma</label>
-                  <input
-                    type="password"
-                    className="search-input"
-                    placeholder="Ingresa la contraseña de tu llave privada"
-                    value={uploadPassword}
-                    onChange={e => setUploadPassword(e.target.value)}
-                    style={{ paddingLeft: 'var(--sp-3)', width: '100%' }}
-                  />
-                </div>
-
-                {uploadState.error && (
-                  <div style={{ color: 'var(--danger-text)', fontSize: 'var(--text-xs)', marginBottom: 'var(--sp-3)', background: 'var(--danger-bg)', padding: 'var(--sp-2) var(--sp-3)', borderRadius: 'var(--radius-sm)' }}>
-                    {uploadState.error}
-                  </div>
-                )}
-                {uploadState.success && (
-                  <div style={{ color: 'var(--success-text)', fontSize: 'var(--text-xs)', marginBottom: 'var(--sp-3)', background: 'var(--success-bg)', padding: 'var(--sp-2) var(--sp-3)', borderRadius: 'var(--radius-sm)' }}>
-                    ✅ e.firma cargada y validada exitosamente
-                  </div>
-                )}
-
-                <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
-                  <button
-                    className="btn btn-primary"
-                    disabled={uploadState.loading}
-                    onClick={async () => {
-                      setUploadState({ loading: true, error: null, success: false });
-                      try {
-                        const cerInput = document.getElementById('cer-upload');
-                        const keyInput = document.getElementById('key-upload');
-                        if (!cerInput.files[0] || !keyInput.files[0]) {
-                          throw new Error('Selecciona ambos archivos (.cer y .key)');
-                        }
-                        if (!uploadPassword) {
-                          throw new Error('Ingresa la contraseña de la e.firma');
-                        }
-
-                        // Convertir archivos físicos a Base64 en el navegador
-                        const fileToBase64 = (file) => new Promise((resolve, reject) => {
-                          const reader = new FileReader();
-                          reader.readAsDataURL(file);
-                          reader.onload = () => resolve(reader.result.split(',')[1]); // Extraer solo la data sin prefijo
-                          reader.onerror = error => reject(error);
-                        });
-
-                        const cer_base64 = await fileToBase64(cerInput.files[0]);
-                        const key_base64 = await fileToBase64(keyInput.files[0]);
-
-                        // Enviar directo a Supabase usando el SDK en el Frontend
-                        // Asegúrate de tener VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en tu .env
-                        const { createClient } = await import('@supabase/supabase-js');
-                        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'TU_SUPABASE_URL';
-                        const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'TU_ANON_KEY';
-                        const supabase = createClient(supabaseUrl, supabaseKey);
-
-                        // NOTA: Para producción, user_id debería venir del contexto de autenticación:
-                        // const { data: { user } } = await supabase.auth.getUser();
-                        // const userId = user.id;
-                        const userId = '00000000-0000-0000-0000-000000000000';
-
-                        const { data, error: upsertError } = await supabase
-                          .from('configuracion_sat')
-                          .upsert({
-                            user_id: userId,
-                            cer_base64: cer_base64,
-                            key_base64: key_base64,
-                            cer_configurado: true,
-                            key_configurado: true,
-                            // Opcionalmente, extraer RFC del certificado en el backend luego o pedirlo aquí
-                          }, { onConflict: 'user_id' })
-                          .select();
-
-                        if (upsertError) {
-                          throw new Error(`Error sincronizando con Supabase: ${upsertError.message}`);
-                        }
-
-                        // Actualizar UI reactivamente con los datos guardados
-                        setNetlifyConfig({ loading: false, error: null, data: {
-                          cer_configurado: true,
-                          key_configurado: true,
-                          // rfc, etc. (se pueden actualizar con otra Cloud Function luego)
-                        } });
-                        setUploadState({ loading: false, error: null, success: true });
-                        setUploadPassword('');
-                        
-                        // Limpiar inputs
-                        cerInput.value = '';
-                        keyInput.value = '';
-
-                      } catch (err) {
-                        setUploadState({ loading: false, error: err.message, success: false });
-                      }
-                    }}
-                  >
-                    {uploadState.loading ? <Loader2 size={14} className="spin-icon" /> : <Upload size={14} />}
-                    {uploadState.loading ? 'Validando...' : 'Subir y validar e.firma'}
-                  </button>
-                  <button className="btn btn-ghost">
-                    <ExternalLink size={14} /> Verificar en SAT
-                  </button>
-                </div>
+              <div style={{ marginTop: 'var(--sp-5)', display: 'flex', gap: 'var(--sp-3)' }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={fetchSupabaseConfig}
+                  disabled={netlifyConfig.loading}
+                >
+                  {netlifyConfig.loading ? <Loader2 size={14} className="spin-icon" /> : <Zap size={14} />}
+                  {netlifyConfig.loading ? 'Sincronizando...' : 'Sincronizar Estado con Supabase'}
+                </button>
               </div>
             </SettingSection>
           )}
