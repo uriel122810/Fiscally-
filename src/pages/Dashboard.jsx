@@ -191,10 +191,14 @@ function SyncBanner({ syncStatus, progress, onStartSync, onCancel }) {
 }
 
 // ─── Dashboard Page ──────────────────────────────────────────────────────────
-export default function Dashboard({ onNavigate }) {
+export default function Dashboard({ onNavigate, userEmail }) {
   const now = new Date();
   const [selectedYear] = useState(now.getFullYear());
   const [selectedMonth] = useState(now.getMonth() + 1);
+
+  // Derivar el nombre del usuario desde el correo
+  const emailStr = userEmail || "usuario@gmail.com";
+  const nombreUsuario = emailStr.split('@')[0];
 
   // ── Use real data hooks ─────────────────────────────────────────────
   const { kpis, monthlyData, rubroDistribution, loading, isLive } = useKpiData(selectedYear, selectedMonth);
@@ -211,7 +215,7 @@ export default function Dashboard({ onNavigate }) {
       {/* Welcome */}
       <div className="page-header">
         <div className="page-header-left">
-          <h1>Buenos días, Juan 👋</h1>
+          <h1>Buenos días, {nombreUsuario} 👋</h1>
           <p style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
             Grupo Tecnológico SAS de CV · Resumen de junio 2026
             <span style={{

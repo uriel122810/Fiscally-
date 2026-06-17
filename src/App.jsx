@@ -88,11 +88,11 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar activePage={activePage} onNavigate={setActivePage} />
+      <Sidebar activePage={activePage} onNavigate={setActivePage} userEmail={session?.user?.email} />
       <div className="main-area">
         <Header activePage={activePage} userEmail={session?.user?.email} />
         <main className="page-content">
-          <PageComponent onNavigate={setActivePage} />
+          <PageComponent onNavigate={setActivePage} userEmail={session?.user?.email} />
         </main>
       </div>
       <ChatWidget />

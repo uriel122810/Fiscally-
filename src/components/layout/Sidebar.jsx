@@ -24,7 +24,11 @@ const systemItems = [
   { id: 'settings', label: 'Configuración', icon: Settings },
 ];
 
-export default function Sidebar({ activePage, onNavigate }) {
+export default function Sidebar({ activePage, onNavigate, userEmail }) {
+  const emailStr = userEmail || "usuario@gmail.com";
+  const shortName = emailStr.split('@')[0];
+  const initial = shortName.charAt(0).toUpperCase();
+
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
@@ -93,9 +97,9 @@ export default function Sidebar({ activePage, onNavigate }) {
 
       <div className="sidebar-footer">
         <div className="user-card">
-          <div className="avatar">JM</div>
+          <div className="avatar" style={{ fontWeight: 600 }}>{initial}</div>
           <div className="user-info">
-            <div className="user-name">Juan Martínez</div>
+            <div className="user-name">{shortName}</div>
             <div className="user-role">Administrador</div>
           </div>
           <ChevronRight size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
