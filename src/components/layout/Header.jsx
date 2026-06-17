@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { Bell, Search, RefreshCw, X, CheckCircle, AlertCircle, AlertTriangle, Info } from 'lucide-react';
+import { Bell, Search, RefreshCw, X, CheckCircle, AlertCircle, AlertTriangle, Info, LogOut, User } from 'lucide-react';
+import { supabase } from '../../api/supabaseClient';
 import { notifications } from '../../data/mockData';
 
 const pageTitles = {
@@ -23,13 +24,15 @@ function NotifIcon({ type }) {
   return <Info size={14} style={{ color: 'var(--info-text)' }} />;
 }
 
-export default function Header({ activePage }) {
+export default function Header({ activePage, userEmail }) {
   const info = pageTitles[activePage] || pageTitles.dashboard;
   const [syncing, setSyncing] = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const notifRef = useRef(null);
+  const userMenuRef = useRef(null);
   const searchRef = useRef(null);
 
   const unreadCount = notifications.filter(n => !n.read).length;
@@ -43,6 +46,7 @@ export default function Header({ activePage }) {
   useEffect(() => {
     const handler = (e) => {
       if (notifRef.current && !notifRef.current.contains(e.target)) setShowNotifs(false);
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target)) setShowUserMenu(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -140,8 +144,55 @@ export default function Header({ activePage }) {
             )}
           </div>
 
-          <div className="avatar" style={{ width: 32, height: 32, fontSize: '0.65rem' }}>
-            JM
+          {/* User Menu */}
+          <div ref={userMenuRef} style={{ position: 'relative' }}>
+            <button
+              onClick={() => setShowUserMenu(!showUserMenu)}
+              style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer' }}
+            >
+              <div className="avatar" style={{ width: 32, height: 32, fontSize: '0.65rem' }}>
+                {userEmail ? userEmail.substring(0, 2).toUpperCase() : 'US'}
+              </div>
+            </button>
+
+            {showUserMenu && (
+              <div 
+                className="notif-dropdown" 
+                style={{ 
+                  right: 0, left: 'auto', width: 220, 
+                  marginTop: 'var(--sp-2)', padding: 'var(--sp-2)' 
+                }}
+              >
+                <div style={{ padding: 'var(--sp-3)', borderBottom: '1px solid var(--border)', marginBottom: 'var(--sp-2)' }}>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', fontWeight: 600 }}>Cuentas</div>
+                  <div style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--text-primary)', wordBreak: 'break-all' }}>
+                    {userEmail || 'Usuario'}
+                  </div>
+                </div>
+                
+                <button 
+                  className="btn btn-ghost" 
+                  style={{ width: '100%', justifyContent: 'flex-start', color: 'var(--text-secondary)' }}
+                >
+                  <User size={15} style={{ marginRight: 8 }} />
+                  Mi Perfil
+                </button>
+                
+                <button 
+                  className="btn btn-ghost" 
+                  style={{ width: '100%', justifyContent: 'flex-start', color: 'var(--danger-text)' }}
+                  onClick={async () => {
+                    setShowUserMenu(false);
+                    if (supabase) {
+                      await supabase.auth.signOut();
+                    }
+                  }}
+                >
+                  <LogOut size={15} style={{ marginRight: 8 }} />
+                  Cerrar Sesión
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </header>
