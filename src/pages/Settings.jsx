@@ -4,8 +4,6 @@ import {
   CheckCircle, AlertCircle, Save, Upload, ExternalLink, Zap, Loader2
 } from 'lucide-react';
 import { companySettings, formatDate } from '../data/mockData';
-import { useAuthStatus } from '../hooks/useSatData';
-import { satApi } from '../api/satClient';
 
 function SettingSection({ icon, title, children }) {
   return (
@@ -44,13 +42,51 @@ function FieldRow({ label, value, mono, editable }) {
 
 export default function Settings() {
   const [activeSection, setActiveSection] = useState('empresa');
-  const [netlifyConfig, setNetlifyConfig] = useState({ loading: true, data: null, error: null });
-  const [uploadState, setUploadState] = useState({ loading: false, error: null, success: false });
-  const [uploadPassword, setUploadPassword] = useState('');
+  
+  // Estados de Sesión y Configuración del SAT
+  const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [netlifyConfig, setNetlifyConfig] = useState({ loading: false, data: null, error: null });
 
-  // Sincronizar configuración directamente desde Supabase
-  const fetchSupabaseConfig = async () => {
-    setNetlifyConfig(prev => ({ ...prev, loading: true }));
+  // 1. ESCUCHA DE SESIÓN ACTIVA (onAuthStateChange)
+  useEffect(() => {
+    let authListener = null;
+
+    const setupAuth = async () => {
+      try {
+        const { supabase } = await import('../api/supabaseClient');
+        if (!supabase) {
+          setAuthLoading(false);
+          return;
+        }
+
+        // Obtener la sesión inicial al cargar
+        const { data: { session: initialSession } } = await supabase.auth.getSession();
+        setSession(initialSession);
+        setAuthLoading(false);
+
+        // Suscribirse dinámicamente a cambios de sesión (login, logout, token refresh)
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, currentSession) => {
+          setSession(currentSession);
+        });
+        
+        authListener = subscription;
+      } catch (err) {
+        console.error("Error inicializando autenticación:", err);
+        setAuthLoading(false);
+      }
+    };
+
+    setupAuth();
+
+    return () => {
+      if (authListener) authListener.unsubscribe();
+    };
+  }, []);
+
+  // 2. CONSULTA DINÁMICA DE CONFIGURACIÓN
+  const fetchSupabaseConfig = async (userId) => {
+    setNetlifyConfig(prev => ({ ...prev, loading: true, error: null }));
     try {
       const { supabase } = await import('../api/supabaseClient');
       
@@ -58,15 +94,10 @@ export default function Settings() {
         throw new Error("El cliente de Supabase no pudo inicializarse por falta de variables de entorno.");
       }
 
-      // Usando UUID de prueba (en prod: supabase.auth.getUser())
-      const userId = '00000000-0000-0000-0000-000000000000'; 
-
-      // 1. Control estricto: abortar si el userId es nulo o indefinido
       if (!userId || userId === 'undefined' || userId === 'null') {
-        throw new Error('Usuario no autenticado o ID inválido. No se puede consultar Supabase.');
+        throw new Error('Usuario no autenticado o ID inválido.');
       }
       
-      // 3. Sintaxis limpia usando .maybeSingle() para evitar el error HTTP 406 (Not Acceptable)
       const { data, error } = await supabase
         .from('configuracion_sat')
         .select('rfc, fecha_vencimiento, cer_configurado, key_configurado')
@@ -84,11 +115,17 @@ export default function Settings() {
     }
   };
 
+  // 3. EFECTO QUE DISPARA LA CONSULTA CUANDO HAY SESIÓN Y LA SECCIÓN ESTÁ ACTIVA
   useEffect(() => {
     if (activeSection === 'sat') {
-      fetchSupabaseConfig();
+      if (session?.user?.id) {
+        fetchSupabaseConfig(session.user.id);
+      } else if (!authLoading) {
+        // Si no está cargando y no hay sesión, apagamos el loading de netlifyConfig
+        setNetlifyConfig(prev => ({ ...prev, loading: false }));
+      }
     }
-  }, [activeSection]);
+  }, [activeSection, session, authLoading]);
 
   const sections = [
     { id: 'empresa', label: 'Empresa', icon: <Building2 size={16} /> },
@@ -155,16 +192,37 @@ export default function Settings() {
 
           {activeSection === 'sat' && (
             <SettingSection icon={<Shield size={16} style={{ color: '#10B981' }} />} title="Certificado de Sello Digital (CSD) / e.firma">
-              {/* Status banner — uses real auth status from Netlify Function */}
               {(() => {
-                if (netlifyConfig.loading) {
+                // Estado 1: Cargando autenticación inicial
+                if (authLoading) {
                   return (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 'var(--sp-4)', color: 'var(--text-tertiary)' }}>
-                      <Loader2 size={16} className="spin-icon" /> Verificando configuración en Supabase...
+                      <Loader2 size={16} className="spin-icon" /> Validando sesión de usuario...
                     </div>
                   );
                 }
 
+                // Estado 2: Usuario NO logueado
+                if (!session || !session.user) {
+                  return (
+                    <div style={{ padding: 'var(--sp-6) var(--sp-4)', background: 'var(--bg-surface-2)', borderRadius: 'var(--radius-md)', textAlign: 'center', border: '1px dashed var(--border)' }}>
+                      <User size={32} style={{ margin: '0 auto var(--sp-3)', color: 'var(--text-tertiary)' }} />
+                      <div style={{ fontWeight: 600, fontSize: 'var(--text-md)', marginBottom: 4 }}>Usuario no autenticado</div>
+                      <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>Por favor, inicia sesión para consultar tus preferencias del SAT.</div>
+                    </div>
+                  );
+                }
+
+                // Estado 3: Obteniendo configuración de BD
+                if (netlifyConfig.loading) {
+                  return (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 'var(--sp-4)', color: 'var(--text-tertiary)' }}>
+                      <Loader2 size={16} className="spin-icon" /> Sincronizando configuración segura...
+                    </div>
+                  );
+                }
+
+                // Estado 4: Error en BD
                 if (netlifyConfig.error) {
                   return (
                     <div style={{ padding: 'var(--sp-4)', background: 'var(--danger-bg)', color: 'var(--danger-text)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--sp-5)' }}>
@@ -174,49 +232,53 @@ export default function Settings() {
                   );
                 }
 
-                const config = netlifyConfig.data;
-                const isVigente = config?.cer_configurado && config?.key_configurado;
-                const expiration = config?.fecha_vencimiento;
+                const config = netlifyConfig.data || {};
+                const isVigente = config.cer_configurado && config.key_configurado;
+                const expiration = config.fecha_vencimiento;
                 
                 return (
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: 'var(--sp-3)',
-                    padding: 'var(--sp-4) var(--sp-5)',
-                    background: isVigente ? 'var(--success-bg)' : 'var(--danger-bg)',
-                    border: `1px solid ${isVigente ? 'var(--success-border)' : 'var(--danger-border)'}`,
-                    borderRadius: 'var(--radius-md)', marginBottom: 'var(--sp-5)',
-                  }}>
-                    {isVigente
-                      ? <CheckCircle size={18} style={{ color: 'var(--success-text)' }} />
-                      : <AlertCircle size={18} style={{ color: 'var(--danger-text)' }} />
-                    }
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: isVigente ? 'var(--success-text)' : 'var(--danger-text)' }}>
-                        {isVigente ? 'Certificado vigente y activo' : 'Certificado no configurado'}
-                      </div>
-                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginTop: 2 }}>
-                        {isVigente && expiration ? `Vence: ${expiration.split('T')[0]}` : 'Sube tu e.firma para conectar con el SAT'}
+                  <>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 'var(--sp-3)',
+                      padding: 'var(--sp-4) var(--sp-5)',
+                      background: isVigente ? 'var(--success-bg)' : 'var(--danger-bg)',
+                      border: `1px solid ${isVigente ? 'var(--success-border)' : 'var(--danger-border)'}`,
+                      borderRadius: 'var(--radius-md)', marginBottom: 'var(--sp-5)',
+                    }}>
+                      {isVigente
+                        ? <CheckCircle size={18} style={{ color: 'var(--success-text)' }} />
+                        : <AlertCircle size={18} style={{ color: 'var(--danger-text)' }} />
+                      }
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: isVigente ? 'var(--success-text)' : 'var(--danger-text)' }}>
+                          {isVigente ? 'Certificado vigente y activo' : 'Certificado no configurado'}
+                        </div>
+                        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginTop: 2 }}>
+                          {isVigente 
+                            ? (expiration ? `Vence: ${expiration.split('T')[0]}` : 'Operando con base de datos segura') 
+                            : 'Solicita al administrador que inyecte tus credenciales en el panel.'}
+                        </div>
                       </div>
                     </div>
-                  </div>
+
+                    <FieldRow label="RFC asociado" value={config.rfc || 'No configurado'} mono />
+                    <FieldRow label="Fecha de vencimiento" value={config.fecha_vencimiento?.split('T')[0] || '—'} />
+                    <FieldRow label="Archivos .cer configurado" value={config.cer_configurado ? '✅ Sí' : '❌ No'} />
+                    <FieldRow label="Archivos .key configurado" value={config.key_configurado ? '✅ Sí' : '❌ No'} />
+
+                    <div style={{ marginTop: 'var(--sp-5)', display: 'flex', gap: 'var(--sp-3)' }}>
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => fetchSupabaseConfig(session.user.id)}
+                        disabled={netlifyConfig.loading}
+                      >
+                        {netlifyConfig.loading ? <Loader2 size={14} className="spin-icon" /> : <Zap size={14} />}
+                        {netlifyConfig.loading ? 'Sincronizando...' : 'Sincronizar Estado con Supabase'}
+                      </button>
+                    </div>
+                  </>
                 );
               })()}
-
-              <FieldRow label="RFC asociado" value={netlifyConfig.data?.rfc || 'No configurado'} mono />
-              <FieldRow label="Fecha de vencimiento" value={netlifyConfig.data?.fecha_vencimiento?.split('T')[0] || '—'} />
-              <FieldRow label="Archivos .cer configurado" value={netlifyConfig.data?.cer_configurado ? '✅ Sí' : '❌ No'} />
-              <FieldRow label="Archivos .key configurado" value={netlifyConfig.data?.key_configurado ? '✅ Sí' : '❌ No'} />
-
-              <div style={{ marginTop: 'var(--sp-5)', display: 'flex', gap: 'var(--sp-3)' }}>
-                <button
-                  className="btn btn-primary"
-                  onClick={fetchSupabaseConfig}
-                  disabled={netlifyConfig.loading}
-                >
-                  {netlifyConfig.loading ? <Loader2 size={14} className="spin-icon" /> : <Zap size={14} />}
-                  {netlifyConfig.loading ? 'Sincronizando...' : 'Sincronizar Estado con Supabase'}
-                </button>
-              </div>
             </SettingSection>
           )}
 
@@ -230,7 +292,6 @@ export default function Settings() {
                   <User size={13} /> Invitar usuario
                 </button>
               </div>
-              {/* User list */}
               {[
                 { name: 'Juan Martínez', role: 'Administrador', email: 'juan@grupotecnologico.mx', status: 'activo' },
                 { name: 'Ana García López', role: 'Contador', email: 'ana@grupotecnologico.mx', status: 'activo' },
