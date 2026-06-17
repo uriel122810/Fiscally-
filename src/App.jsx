@@ -95,7 +95,7 @@ export default function App() {
           <PageComponent onNavigate={setActivePage} userEmail={session?.user?.email} />
         </main>
       </div>
-      <ChatWidget />
+      <ChatWidget userEmail={session?.user?.email} />
     </div>
   );
 }

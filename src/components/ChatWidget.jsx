@@ -43,9 +43,22 @@ function TypingIndicator() {
   );
 }
 
-export default function ChatWidget() {
+export default function ChatWidget({ userEmail }) {
   const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState(chatMessages);
+  
+  // Initialize message dynamically
+  const initialMessage = (() => {
+    const emailStr = userEmail || "usuario@gmail.com";
+    const nombreUsuario = emailStr.split('@')[0];
+    return {
+      id: '1',
+      role: 'assistant',
+      content: `¡Hola, ${nombreUsuario}! 👋 Soy tu Asistente Fiscal de Fiscally. Puedo responder preguntas sobre tus facturas, gastos, ingresos y más. ¿En qué puedo ayudarte hoy?`,
+      time: new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
+    };
+  })();
+
+  const [messages, setMessages] = useState([initialMessage]);
   const [input, setInput] = useState('');
   const [typing, setTyping] = useState(false);
   const messagesEndRef = useRef(null);

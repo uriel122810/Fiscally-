@@ -145,14 +145,20 @@ export const satApi = {
 
   // ── Downloads ─────────────────────────────────────────────────────
   /**
-   * Download raw CFDI XML file.
+   * Download raw CFDI XML file. (Simulated for Netlify)
    */
-  downloadXml: (uuid, filename) => downloadFile(`${API_BASE}/cfdi/${uuid}/xml`, filename || `${uuid}.xml`),
+  downloadXml: async (uuid, filename) => {
+    await new Promise(r => setTimeout(r, 800));
+    alert(`📄 Simulación: Descargando ${filename || `${uuid}.xml`}`);
+  },
 
   /**
-   * Download generated PDF.
+   * Download generated PDF. (Simulated for Netlify)
    */
-  downloadPdf: (uuid, filename) => downloadFile(`${API_BASE}/cfdi/${uuid}/pdf`, filename || `${uuid}.pdf`),
+  downloadPdf: async (uuid, filename) => {
+    await new Promise(r => setTimeout(r, 800));
+    alert(`📑 Simulación: Descargando ${filename || `${uuid}.pdf`}`);
+  },
 
   // ── SAT Download Management ───────────────────────────────────────
   /**
