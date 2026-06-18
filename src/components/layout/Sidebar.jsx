@@ -24,7 +24,7 @@ const systemItems = [
   { id: 'settings', label: 'Configuración', icon: Settings },
 ];
 
-export default function Sidebar({ activePage, onNavigate, userEmail }) {
+export default function Sidebar({ activePage, onNavigate, userEmail, userRole, companyLogo }) {
   const emailStr = userEmail || "usuario@gmail.com";
   const shortName = emailStr.split('@')[0];
   const initial = shortName.charAt(0).toUpperCase();
@@ -32,7 +32,11 @@ export default function Sidebar({ activePage, onNavigate, userEmail }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <div className="logo-mark">Fi</div>
+        {companyLogo ? (
+          <img src={companyLogo} alt="Logo" className="logo-mark" style={{ width: 32, height: 32, padding: 0, objectFit: 'contain', background: 'transparent' }} />
+        ) : (
+          <div className="logo-mark">Fi</div>
+        )}
         <div>
           <span className="logo-text">Fiscally</span>
           <span className="logo-badge">Pro</span>
@@ -96,11 +100,15 @@ export default function Sidebar({ activePage, onNavigate, userEmail }) {
       </nav>
 
       <div className="sidebar-footer">
-        <div className="user-card">
+        <div 
+          className="user-card"
+          onClick={() => onNavigate('settings')}
+          style={{ cursor: 'pointer' }}
+        >
           <div className="avatar" style={{ fontWeight: 600 }}>{initial}</div>
           <div className="user-info">
             <div className="user-name">{shortName}</div>
-            <div className="user-role">Administrador</div>
+            <div className="user-role" style={{ textTransform: 'capitalize' }}>{userRole || 'Usuario'}</div>
           </div>
           <ChevronRight size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
         </div>

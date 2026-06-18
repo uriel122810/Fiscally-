@@ -46,6 +46,8 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [loadingSession, setLoadingSession] = useState(true);
   const [activePage, setActivePage] = useState('settings'); // Default a settings para que prueben de inmediato
+  const [userRole, setUserRole] = useState('usuario');
+  const [companyLogo, setCompanyLogo] = useState(null);
 
   useEffect(() => {
     // Si el cliente no pudo inicializarse (sin variables de entorno), evitamos petar la UI
@@ -54,10 +56,44 @@ export default function App() {
       return;
     }
 
+    const fetchUserAndCompanyData = async (currentSession) => {
+      if (!currentSession?.user?.id) return;
+      
+      try {
+        // Fetch role
+        const { data: profile } = await supabase
+          .from('perfiles')
+          .select('rol')
+          .eq('id', currentSession.user.id)
+          .single();
+          
+        if (profile?.rol) {
+          setUserRole(profile.rol);
+        }
+
+        // Fetch company logo (asumiendo que la configuración está atada al user_id)
+        const { data: company } = await supabase
+          .from('configuracion_empresa')
+          .select('logo_url')
+          .eq('user_id', currentSession.user.id)
+          .maybeSingle();
+
+        if (company?.logo_url) {
+          setCompanyLogo(company.logo_url);
+        }
+      } catch (err) {
+        console.error("Error fetching user data", err);
+      }
+    };
+
     // 1. Obtener la sesión actual al cargar la app
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      setLoadingSession(false);
+      if (session) {
+        fetchUserAndCompanyData(session).finally(() => setLoadingSession(false));
+      } else {
+        setLoadingSession(false);
+      }
     }).catch(() => {
       setLoadingSession(false);
     });
@@ -65,10 +101,16 @@ export default function App() {
     // 2. Escuchar dinámicamente si el usuario entra o sale (onAuthStateChange)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, currentSession) => {
       setSession(currentSession);
+      if (currentSession) {
+        fetchUserAndCompanyData(currentSession);
+      }
     });
 
     return () => subscription?.unsubscribe();
   }, []);
+
+  // Función para actualizar el logo y propagarlo (se usa en Settings)
+  const updateCompanyLogo = (url) => setCompanyLogo(url);
 
   if (loadingSession) {
     return (
@@ -88,11 +130,23 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar activePage={activePage} onNavigate={setActivePage} userEmail={session?.user?.email} />
+      <Sidebar 
+        activePage={activePage} 
+        onNavigate={setActivePage} 
+        userEmail={session?.user?.email} 
+        userRole={userRole} 
+        companyLogo={companyLogo} 
+      />
       <div className="main-area">
         <Header activePage={activePage} userEmail={session?.user?.email} />
         <main className="page-content">
-          <PageComponent onNavigate={setActivePage} userEmail={session?.user?.email} />
+          <PageComponent 
+            onNavigate={setActivePage} 
+            userEmail={session?.user?.email} 
+            userRole={userRole} 
+            companyLogo={companyLogo} 
+            onUpdateLogo={updateCompanyLogo} 
+          />
         </main>
       </div>
       <ChatWidget userEmail={session?.user?.email} />

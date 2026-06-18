@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Building2, User, Shield, Key, CreditCard, Bell, Users,
   CheckCircle, AlertCircle, Save, Upload, ExternalLink, Zap, Loader2
@@ -21,28 +21,42 @@ function SettingSection({ icon, title, children }) {
   );
 }
 
-function FieldRow({ label, value, mono, editable }) {
+function FieldRow({ label, value, mono, editable, onChange, readOnly }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 'var(--sp-3) 0', borderBottom: '1px solid var(--border)' }}>
       <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', fontWeight: 500 }}>{label}</span>
-      {editable ? (
+      {editable && !readOnly ? (
         <input
           className="search-input"
-          defaultValue={value}
+          value={value || ''}
+          onChange={(e) => onChange && onChange(e.target.value)}
           style={{ maxWidth: 320, paddingLeft: 'var(--sp-3)', textAlign: 'right' }}
         />
       ) : (
-        <span className={mono ? 'mono-sm' : ''} style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>
-          {value}
+        <span className={mono ? 'mono-sm' : ''} style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-primary)', opacity: readOnly && editable ? 0.6 : 1 }}>
+          {value || '—'}
         </span>
       )}
     </div>
   );
 }
 
-export default function Settings() {
+export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
   const [activeSection, setActiveSection] = useState('empresa');
+  const isAdmin = userRole === 'admin';
+  const fileInputRef = useRef(null);
   
+  // Estados de la Empresa
+  const [companyData, setCompanyData] = useState({
+    razon_social: '',
+    rfc: '',
+    regimen_fiscal: '',
+    direccion_fiscal: '',
+    correo: '',
+    telefono: '',
+  });
+  const [savingCompany, setSavingCompany] = useState(false);
+
   // Estados de Sesión y Configuración del SAT
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -127,10 +141,89 @@ export default function Settings() {
     }
   }, [activeSection, session, authLoading]);
 
+  // 4. CONSULTA DINÁMICA DE EMPRESA
+  useEffect(() => {
+    const fetchCompany = async () => {
+      if (!session?.user?.id) return;
+      try {
+        const { supabase } = await import('../api/supabaseClient');
+        const { data } = await supabase
+          .from('configuracion_empresa')
+          .select('*')
+          .eq('user_id', session.user.id)
+          .maybeSingle();
+        if (data) {
+          setCompanyData({
+            razon_social: data.razon_social || '',
+            rfc: data.rfc || '',
+            regimen_fiscal: data.regimen_fiscal || '',
+            direccion_fiscal: data.direccion_fiscal || '',
+            correo: data.correo || '',
+            telefono: data.telefono || '',
+          });
+        }
+      } catch (err) {
+        console.error("Error fetching company", err);
+      }
+    };
+    if (session) {
+      fetchCompany();
+    }
+  }, [session]);
+
+  const handleSaveCompany = async () => {
+    if (!isAdmin) return;
+    setSavingCompany(true);
+    try {
+      const { supabase } = await import('../api/supabaseClient');
+      await supabase
+        .from('configuracion_empresa')
+        .upsert({ user_id: session.user.id, ...companyData });
+      alert('Cambios de la empresa guardados con éxito');
+    } catch (error) {
+      console.error(error);
+      alert('Error guardando los cambios de la empresa');
+    }
+    setSavingCompany(false);
+  };
+
+  const handleUploadLogo = async (e) => {
+    const file = e.target.files[0];
+    if (!file || !isAdmin) return;
+    try {
+      const { supabase } = await import('../api/supabaseClient');
+      const fileExt = file.name.split('.').pop();
+      const fileName = `logo_${session.user.id}.${fileExt}`;
+      const filePath = `${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('logos')
+        .upload(filePath, file, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const { data: publicUrlData } = supabase.storage
+        .from('logos')
+        .getPublicUrl(filePath);
+      
+      const logoUrl = publicUrlData.publicUrl;
+
+      await supabase
+        .from('configuracion_empresa')
+        .upsert({ user_id: session.user.id, logo_url: logoUrl });
+
+      if (onUpdateLogo) onUpdateLogo(logoUrl);
+      alert('Logo actualizado con éxito');
+    } catch (error) {
+      console.error(error);
+      alert('Error al subir el logo');
+    }
+  };
+
   const sections = [
     { id: 'empresa', label: 'Empresa', icon: <Building2 size={16} /> },
     { id: 'sat', label: 'Certificado SAT', icon: <Shield size={16} /> },
-    { id: 'usuarios', label: 'Usuarios', icon: <Users size={16} /> },
+    ...(isAdmin ? [{ id: 'usuarios', label: 'Usuarios', icon: <Users size={16} /> }] : []),
     { id: 'plan', label: 'Suscripción', icon: <CreditCard size={16} /> },
     { id: 'notificaciones', label: 'Notificaciones', icon: <Bell size={16} /> },
   ];
@@ -143,8 +236,8 @@ export default function Settings() {
           <p>Datos de empresa, certificado SAT y preferencias del sistema</p>
         </div>
         <div className="page-header-actions">
-          <button className="btn btn-primary">
-            <Save size={15} /> Guardar cambios
+          <button className="btn btn-primary" onClick={activeSection === 'empresa' ? handleSaveCompany : undefined} disabled={savingCompany || !isAdmin}>
+            {savingCompany ? <Loader2 size={15} className="spin-icon" /> : <Save size={15} />} Guardar cambios
           </button>
         </div>
       </div>
@@ -169,22 +262,27 @@ export default function Settings() {
         <div>
           {activeSection === 'empresa' && (
             <SettingSection icon={<Building2 size={16} style={{ color: 'var(--accent-500)' }} />} title="Datos de la Empresa">
-              <FieldRow label="Razón Social" value={companySettings.nombre} editable />
-              <FieldRow label="RFC" value={companySettings.rfc} mono />
-              <FieldRow label="Régimen Fiscal" value={companySettings.regimen} />
-              <FieldRow label="Dirección Fiscal" value={companySettings.direccion} editable />
-              <FieldRow label="Correo electrónico" value={companySettings.email} editable />
-              <FieldRow label="Teléfono" value={companySettings.telefono} editable />
+              <FieldRow label="Razón Social" value={companyData.razon_social} onChange={(v) => setCompanyData({...companyData, razon_social: v})} editable readOnly={!isAdmin} />
+              <FieldRow label="RFC" value={companyData.rfc} onChange={(v) => setCompanyData({...companyData, rfc: v})} editable readOnly={!isAdmin} mono />
+              <FieldRow label="Régimen Fiscal" value={companyData.regimen_fiscal} onChange={(v) => setCompanyData({...companyData, regimen_fiscal: v})} editable readOnly={!isAdmin} />
+              <FieldRow label="Dirección Fiscal" value={companyData.direccion_fiscal} onChange={(v) => setCompanyData({...companyData, direccion_fiscal: v})} editable readOnly={!isAdmin} />
+              <FieldRow label="Correo electrónico" value={companyData.correo} onChange={(v) => setCompanyData({...companyData, correo: v})} editable readOnly={!isAdmin} />
+              <FieldRow label="Teléfono" value={companyData.telefono} onChange={(v) => setCompanyData({...companyData, telefono: v})} editable readOnly={!isAdmin} />
 
               <div style={{ marginTop: 'var(--sp-5)', display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
-                <div style={{ width: 64, height: 64, borderRadius: 'var(--radius-lg)', background: 'linear-gradient(135deg, var(--accent-400), var(--accent-700))', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700, fontSize: 'var(--text-xl)' }}>
-                  GT
+                <div style={{ width: 64, height: 64, borderRadius: 'var(--radius-lg)', background: companyLogo ? 'transparent' : 'linear-gradient(135deg, var(--accent-400), var(--accent-700))', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700, fontSize: 'var(--text-xl)', overflow: 'hidden' }}>
+                  {companyLogo ? <img src={companyLogo} alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : 'GT'}
                 </div>
                 <div>
                   <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, marginBottom: 4 }}>Logo de la empresa</div>
-                  <button className="btn btn-secondary btn-sm">
-                    <Upload size={13} /> Subir logo
-                  </button>
+                  {isAdmin && (
+                    <>
+                      <input type="file" ref={fileInputRef} style={{ display: 'none' }} accept="image/*" onChange={handleUploadLogo} />
+                      <button className="btn btn-secondary btn-sm" onClick={() => fileInputRef.current?.click()}>
+                        <Upload size={13} /> Subir logo
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </SettingSection>
