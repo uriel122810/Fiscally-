@@ -112,7 +112,8 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
         throw new Error('Usuario no autenticado o ID inválido.');
       }
       
-      const { data, error } = await supabase
+      // Consulta ESTRICTAMENTE de lectura (SELECT) para evitar borrados accidentales
+      let { data, error } = await supabase
         .from('configuracion_sat')
         .select('rfc, fecha_vencimiento, cer_configurado, key_configurado')
         .eq('user_id', userId)
@@ -120,6 +121,19 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
 
       if (error) {
         throw new Error(`Error BD: ${error.message}`);
+      }
+      
+      // Si no existe configuración para el usuario, buscamos un registro base general
+      if (!data) {
+        const { data: baseData } = await supabase
+          .from('configuracion_sat')
+          .select('rfc, fecha_vencimiento, cer_configurado, key_configurado')
+          .is('user_id', null)
+          .maybeSingle();
+          
+        if (baseData) {
+          data = baseData;
+        }
       }
       
       setNetlifyConfig({ loading: false, data: data || {}, error: null });
@@ -359,12 +373,13 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
                       </div>
                     </div>
 
-                    <FieldRow label="RFC asociado" value={config.rfc || 'No configurado'} mono />
+                    {/* El RFC es de solo lectura (editable, pero readOnly) para evitar romper la sincronización */}
+                    <FieldRow label="RFC asociado" value={config.rfc || ''} editable readOnly mono />
                     <FieldRow label="Fecha de vencimiento" value={config.fecha_vencimiento?.split('T')[0] || '—'} />
                     <FieldRow label="Archivos .cer configurado" value={config.cer_configurado ? '✅ Sí' : '❌ No'} />
                     <FieldRow label="Archivos .key configurado" value={config.key_configurado ? '✅ Sí' : '❌ No'} />
 
-                    <div style={{ marginTop: 'var(--sp-5)', display: 'flex', gap: 'var(--sp-3)' }}>
+                    <div style={{ marginTop: 'var(--sp-5)', display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
                       <button
                         className="btn btn-primary"
                         onClick={() => fetchSupabaseConfig(session.user.id)}
@@ -372,6 +387,29 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
                       >
                         {netlifyConfig.loading ? <Loader2 size={14} className="spin-icon" /> : <Zap size={14} />}
                         {netlifyConfig.loading ? 'Sincronizando...' : 'Sincronizar Estado con Supabase'}
+                      </button>
+
+                      {/* Botones administrativos protegidos por rol */}
+                      <button 
+                        className="btn btn-secondary"
+                        disabled={!isAdmin}
+                        onClick={() => isAdmin && alert("Sube tu archivo .cer")}
+                      >
+                        <Upload size={14} /> Subir .cer
+                      </button>
+                      <button 
+                        className="btn btn-secondary"
+                        disabled={!isAdmin}
+                        onClick={() => isAdmin && alert("Sube tu archivo .key")}
+                      >
+                        <Upload size={14} /> Subir .key
+                      </button>
+                      <button 
+                        className="btn btn-primary"
+                        style={{ marginLeft: 'auto', background: 'var(--accent-600)', borderColor: 'var(--accent-600)' }}
+                        disabled={!isAdmin}
+                      >
+                        Actualizar Certificado
                       </button>
                     </div>
                   </>
