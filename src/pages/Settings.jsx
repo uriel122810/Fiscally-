@@ -27,12 +27,12 @@ function FieldRow({ label, value, mono, editable, onChange, readOnly }) {
       <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', fontWeight: 500 }}>{label}</span>
       {editable ? (
         <input
-          className="search-input"
+          className={`search-input outline-none transition-colors duration-200 ${readOnly ? 'bg-gray-100 text-gray-500 cursor-not-allowed opacity-60' : 'focus:border-blue-500 focus:ring-1 focus:ring-blue-500'}`}
           value={value || ''}
           onChange={(e) => onChange && onChange(e.target.value)}
           disabled={readOnly}
           readOnly={readOnly}
-          style={{ maxWidth: 320, paddingLeft: 'var(--sp-3)', textAlign: 'right', opacity: readOnly ? 0.6 : 1, cursor: readOnly ? 'not-allowed' : 'text' }}
+          style={{ maxWidth: 320, paddingLeft: 'var(--sp-3)', textAlign: 'right' }}
         />
       ) : (
         <span className={mono ? 'mono-sm' : ''} style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>
@@ -206,7 +206,6 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
   }, [session]);
 
   const handleSaveCompany = async () => {
-    if (!isAdmin) return;
     setSavingCompany(true);
     try {
       const { supabase } = await import('../api/supabaseClient');
@@ -272,7 +271,7 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
           <p>Datos de empresa, certificado SAT y preferencias del sistema</p>
         </div>
         <div className="page-header-actions">
-          <button className="btn btn-primary" onClick={activeSection === 'empresa' ? handleSaveCompany : undefined} disabled={savingCompany || !isAdmin}>
+          <button className="btn btn-primary" onClick={activeSection === 'empresa' ? handleSaveCompany : undefined} disabled={savingCompany}>
             {savingCompany ? <Loader2 size={15} className="spin-icon" /> : <Save size={15} />} Guardar cambios
           </button>
         </div>
@@ -298,12 +297,12 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
         <div>
           {activeSection === 'empresa' && (
             <SettingSection icon={<Building2 size={16} style={{ color: 'var(--accent-500)' }} />} title="Datos de la Empresa">
-              <FieldRow label="Razón Social" value={companyData.razon_social} onChange={(v) => setCompanyData({...companyData, razon_social: v})} editable readOnly={!isAdmin} />
+              <FieldRow label="Razón Social" value={companyData.razon_social} onChange={(v) => setCompanyData({...companyData, razon_social: v})} editable />
               <FieldRow label="RFC" value={companyData.rfc} onChange={(v) => setCompanyData({...companyData, rfc: v})} editable readOnly={true} mono />
-              <FieldRow label="Régimen Fiscal" value={companyData.regimen_fiscal} onChange={(v) => setCompanyData({...companyData, regimen_fiscal: v})} editable readOnly={!isAdmin} />
-              <FieldRow label="Dirección Fiscal" value={companyData.direccion_fiscal} onChange={(v) => setCompanyData({...companyData, direccion_fiscal: v})} editable readOnly={!isAdmin} />
-              <FieldRow label="Correo electrónico" value={companyData.correo} onChange={(v) => setCompanyData({...companyData, correo: v})} editable readOnly={!isAdmin} />
-              <FieldRow label="Teléfono" value={companyData.telefono} onChange={(v) => setCompanyData({...companyData, telefono: v})} editable readOnly={!isAdmin} />
+              <FieldRow label="Régimen Fiscal" value={companyData.regimen_fiscal} onChange={(v) => setCompanyData({...companyData, regimen_fiscal: v})} editable />
+              <FieldRow label="Dirección Fiscal" value={companyData.direccion_fiscal} onChange={(v) => setCompanyData({...companyData, direccion_fiscal: v})} editable />
+              <FieldRow label="Correo electrónico" value={companyData.correo} onChange={(v) => setCompanyData({...companyData, correo: v})} editable />
+              <FieldRow label="Teléfono" value={companyData.telefono} onChange={(v) => setCompanyData({...companyData, telefono: v})} editable />
 
               <div style={{ marginTop: 'var(--sp-5)', display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
                 <div style={{ width: 64, height: 64, borderRadius: 'var(--radius-lg)', background: companyLogo ? 'transparent' : 'linear-gradient(135deg, var(--accent-400), var(--accent-700))', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700, fontSize: 'var(--text-xl)', overflow: 'hidden' }}>
