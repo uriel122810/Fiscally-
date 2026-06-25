@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { ShoppingCart, Plus, FileText, Package, Clock, CheckCircle, AlertCircle, Eye, ChevronDown } from 'lucide-react';
 import { purchaseOrders, formatCurrency, formatDate } from '../data/mockData';
 
@@ -82,8 +82,8 @@ export default function Purchases() {
           </thead>
           <tbody>
             {purchaseOrders.map(order => (
-              <>
-                <tr key={order.id} className="table-row" onClick={() => setExpandedId(expandedId === order.id ? null : order.id)}>
+              <React.Fragment key={order.id}>
+                <tr className="table-row" onClick={() => setExpandedId(expandedId === order.id ? null : order.id)}>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <ShoppingCart size={14} style={{ color: 'var(--accent-500)', flexShrink: 0 }} />

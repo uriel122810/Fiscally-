@@ -158,4 +158,17 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+  // En producción, es recomendable cerrar recursos de manera ordenada
+  // closeDatabase();
+  // process.exit(1);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught Exception thrown:', err);
+  closeDatabase();
+  process.exit(1);
+});
+
 start();
