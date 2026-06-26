@@ -135,7 +135,7 @@ export default function Purchases() {
                     </td>
                   </tr>
                 )}
-              </>
+              </React.Fragment>
             ))}
           </tbody>
         </table>
