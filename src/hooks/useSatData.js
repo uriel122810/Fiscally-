@@ -76,7 +76,7 @@ export function useInvoices(filters = {}) {
       if (backendUp) {
         const response = await satApi.getCfdis(filtersRef.current);
 
-        if (response.success && response.data.invoices.length > 0) {
+        if (response.success && response.data?.invoices?.length > 0) {
           setInvoices(response.data.invoices);
           setTotal(response.data.total);
           setIsLive(true);
@@ -343,7 +343,7 @@ export function useRetenciones() {
         if (backendUp) {
           // Retenciones come from CFDIs with tipo_comprobante that have retenciones
           const response = await satApi.getCfdis({ limit: 200 });
-          if (response.success && response.data.invoices.length > 0) {
+          if (response.success && response.data?.invoices?.length > 0) {
             const withRetenciones = response.data.invoices
               .filter(inv => (inv.isr_retenido > 0 || inv.iva_retenido > 0))
               .map((inv, idx) => ({

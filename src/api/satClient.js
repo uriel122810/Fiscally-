@@ -1,21 +1,36 @@
 // ─── SAT API Client ─────────────────────────────────────────────────────
 // HTTP client wrapper for all backend SAT API calls.
-// Used by React hooks to fetch real CFDI data from the Express backend.
+// Used by React hooks to fetch real CFDI data from the Express backend
+// OR from Supabase Edge Functions.
 // ─────────────────────────────────────────────────────────────────────────
 
-const API_BASE = '/api/sat';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+// Si existe configuración de Supabase, arma la URL hacia las Edge Functions
+// Formato: https://<PROJECT_REF>.supabase.co/functions/v1/sat
+const API_BASE = supabaseUrl 
+  ? `${supabaseUrl}/functions/v1/sat` 
+  : '/api/sat';
 
 /**
  * Base fetch wrapper with error handling.
  */
 async function request(url, options = {}) {
+  const headers = {
+    'Content-Type': 'application/json',
+    ...options.headers,
+  };
+
+  // Inyectar el token de autenticación para Supabase Edge Functions si está disponible
+  if (supabaseUrl && supabaseKey) {
+    headers['Authorization'] = `Bearer ${supabaseKey}`;
+  }
+
   try {
     const response = await fetch(url, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
       ...options,
+      headers,
     });
 
     // Handle file downloads
