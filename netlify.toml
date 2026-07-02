@@ -1,9 +1,10 @@
 [build]
   command = "npm run build"
   publish = "dist"
-  functions = "netlify/functions"
 
-# ─── SAT Pipeline Endpoints (Serverless Functions) ───────────────
+[functions]
+  node_bundler = "esbuild"
+  external_node_modules = ["@nodecfdi/sat-ws-descarga-masiva", "@nodecfdi/credentials"]
 
 [[redirects]]
   from = "/api/sat/authenticate"
@@ -25,37 +26,6 @@
   to = "/.netlify/functions/sat-download"
   status = 200
 
-# ─── Legacy Endpoints ────────────────────────────────────────────
-
-[[redirects]]
-  from = "/api/health"
-  to = "/.netlify/functions/health"
-  status = 200
-
-[[redirects]]
-  from = "/api/sat/download/request"
-  to = "/.netlify/functions/sat-download-request"
-  status = 200
-
-[[redirects]]
-  from = "/api/sat/cfdi/stats"
-  to = "/.netlify/functions/cfdi-stats"
-  status = 200
-
-[[redirects]]
-  from = "/api/sat/cfdi"
-  to = "/.netlify/functions/cfdi"
-  status = 200
-
-# ─── Catch-all para otras APIs (Dynamic Handler) ─────────────────
-[[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
-
-# ─── Single Page Application (SPA) Fallback ──────────────────────
-# IMPORTANTE: Esta regla debe ser la última para no atrapar 
-# las llamadas a la API y enrutar toda navegación al frontend.
 [[redirects]]
   from = "/*"
   to = "/index.html"
