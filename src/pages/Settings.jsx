@@ -64,6 +64,11 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
   const [authLoading, setAuthLoading] = useState(true);
   const [netlifyConfig, setNetlifyConfig] = useState({ loading: false, data: null, error: null });
 
+  // SAT Connection States
+  const [satPassword, setSatPassword] = useState('');
+  const [satConnecting, setSatConnecting] = useState(false);
+  const [satConnectionResult, setSatConnectionResult] = useState(null);
+
   // 1. ESCUCHA DE SESIÓN ACTIVA (onAuthStateChange)
   useEffect(() => {
     let authListener = null;
@@ -399,6 +404,135 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
                     <FieldRow label="Fecha de vencimiento" value={config.fecha_vencimiento?.split('T')[0] || '—'} />
                     <FieldRow label="Archivos .cer configurado" value={config.cer_configurado ? '✅ Sí' : '❌ No'} />
                     <FieldRow label="Archivos .key configurado" value={config.key_configurado ? '✅ Sí' : '❌ No'} />
+
+                    {/* ── SAT Connection Section ── */}
+                    {isVigente && (
+                      <div style={{ marginTop: 'var(--sp-6)', padding: 'var(--sp-5)', background: 'var(--bg-surface-2)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                        <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', marginBottom: 'var(--sp-3)', display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+                          <Zap size={14} style={{ color: 'var(--accent-500)' }} />
+                          Conexión al SAT — Descarga Masiva
+                        </div>
+                        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginBottom: 'var(--sp-4)' }}>
+                          Ingresa la contraseña de tu e.firma para autenticarte con el SAT y descargar tus CFDIs.
+                        </div>
+
+                        <div style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                          <div style={{ flex: '1 1 200px' }}>
+                            <label style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Contraseña e.firma</label>
+                            <input
+                              id="sat-efirma-password"
+                              type="password"
+                              className="search-input"
+                              placeholder="••••••••"
+                              value={satPassword}
+                              onChange={(e) => setSatPassword(e.target.value)}
+                              style={{ width: '100%', paddingLeft: 'var(--sp-3)' }}
+                            />
+                          </div>
+                          <button
+                            id="btn-sat-authenticate"
+                            className="btn btn-primary"
+                            disabled={!satPassword || satConnecting}
+                            onClick={async () => {
+                              setSatConnecting(true);
+                              setSatConnectionResult(null);
+                              try {
+                                const { satApi } = await import('../api/satClient.js');
+                                const result = await satApi.satAuthenticate(satPassword, session.user.id);
+                                setSatConnectionResult(result);
+                                if (result.success) {
+                                  fetchSupabaseConfig(session.user.id);
+                                }
+                              } catch (err) {
+                                setSatConnectionResult({ success: false, error: err.message });
+                              }
+                              setSatConnecting(false);
+                            }}
+                            style={{ whiteSpace: 'nowrap' }}
+                          >
+                            {satConnecting ? <Loader2 size={14} className="spin-icon" /> : <Zap size={14} />}
+                            {satConnecting ? 'Conectando...' : 'Conectar al SAT'}
+                          </button>
+                        </div>
+
+                        {/* Connection result feedback */}
+                        {satConnectionResult && (
+                          <div style={{
+                            marginTop: 'var(--sp-3)',
+                            padding: 'var(--sp-3) var(--sp-4)',
+                            borderRadius: 'var(--radius-md)',
+                            background: satConnectionResult.success ? 'var(--success-bg)' : 'var(--danger-bg)',
+                            border: `1px solid ${satConnectionResult.success ? 'var(--success-border)' : 'var(--danger-border)'}`,
+                            fontSize: 'var(--text-sm)',
+                            color: satConnectionResult.success ? 'var(--success-text)' : 'var(--danger-text)',
+                          }}>
+                            {satConnectionResult.success ? <CheckCircle size={14} style={{ display: 'inline', marginRight: 6 }} /> : <AlertCircle size={14} style={{ display: 'inline', marginRight: 6 }} />}
+                            {satConnectionResult.success
+                              ? `✅ ${satConnectionResult.message || 'Conexión exitosa con el SAT'}`
+                              : `❌ ${satConnectionResult.error || 'Error de conexión'}`
+                            }
+                          </div>
+                        )}
+
+                        {/* Sync trigger — only shows after successful authentication */}
+                        {satConnectionResult?.success && (
+                          <div style={{ marginTop: 'var(--sp-4)', padding: 'var(--sp-4)', background: 'var(--bg-main)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                            <div style={{ fontWeight: 600, fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginBottom: 'var(--sp-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                              Descargar CFDIs del SAT
+                            </div>
+                            <div style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                              <div>
+                                <label style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', display: 'block', marginBottom: 2 }}>Desde</label>
+                                <input type="date" id="sat-sync-date-start" className="search-input" style={{ paddingLeft: 'var(--sp-3)' }}
+                                  defaultValue={new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]} />
+                              </div>
+                              <div>
+                                <label style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', display: 'block', marginBottom: 2 }}>Hasta</label>
+                                <input type="date" id="sat-sync-date-end" className="search-input" style={{ paddingLeft: 'var(--sp-3)' }}
+                                  defaultValue={new Date().toISOString().split('T')[0]} />
+                              </div>
+                              <button
+                                id="btn-sat-sync-emitidos"
+                                className="btn btn-secondary"
+                                onClick={() => {
+                                  const ds = document.getElementById('sat-sync-date-start')?.value;
+                                  const de = document.getElementById('sat-sync-date-end')?.value;
+                                  if (ds && de) {
+                                    import('../hooks/useSatData.js').then(m => {
+                                      // The hook approach is better — this is a quick trigger
+                                      import('../api/satClient.js').then(({ satApi: api }) => {
+                                        api.satQuery({ password: satPassword, user_id: session.user.id, type: 'emitidos', dateStart: ds, dateEnd: de })
+                                          .then(r => alert(r.success ? `Solicitud enviada al SAT. ID: ${r.data?.requestId}` : `Error: ${r.error}`))
+                                          .catch(e => alert(`Error: ${e.message}`));
+                                      });
+                                    });
+                                  }
+                                }}
+                              >
+                                📤 Descargar Emitidos
+                              </button>
+                              <button
+                                id="btn-sat-sync-recibidos"
+                                className="btn btn-secondary"
+                                onClick={() => {
+                                  const ds = document.getElementById('sat-sync-date-start')?.value;
+                                  const de = document.getElementById('sat-sync-date-end')?.value;
+                                  if (ds && de) {
+                                    import('../api/satClient.js').then(({ satApi: api }) => {
+                                      api.satQuery({ password: satPassword, user_id: session.user.id, type: 'recibidos', dateStart: ds, dateEnd: de })
+                                        .then(r => alert(r.success ? `Solicitud enviada al SAT. ID: ${r.data?.requestId}` : `Error: ${r.error}`))
+                                        .catch(e => alert(`Error: ${e.message}`));
+                                    });
+                                  }
+                                }}
+                              >
+                                📥 Descargar Recibidos
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <div style={{ marginTop: 'var(--sp-5)', display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
                       <button

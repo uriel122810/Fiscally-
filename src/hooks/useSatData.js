@@ -244,42 +244,175 @@ export function useKpiData(year, month) {
 
 // ─── useSatSync ─────────────────────────────────────────────────────────
 /**
- * Manages the SAT download request lifecycle.
+ * Manages the full SAT Descarga Masiva lifecycle:
+ * 1. Authenticate with SAT (get token)
+ * 2. Query (SolicitaDescarga) → get requestId
+ * 3. Verify (poll every 10s) → get packageIds
+ * 4. Download packages → parse & store in Supabase
+ *
+ * Requires e.firma password and Supabase user_id for each call.
  */
 export function useSatSync() {
-  const [syncStatus, setSyncStatus] = useState('idle'); // idle, requesting, processing, downloading, completed, error
+  const [syncStatus, setSyncStatus] = useState('idle');
+  // idle | authenticating | requesting | verifying | downloading | completed | error
   const [progress, setProgress] = useState(null);
   const [error, setError] = useState(null);
   const pollRef = useRef(null);
+  const cancelledRef = useRef(false);
 
-  const startSync = useCallback(async (type = 'emitidos', dateStart, dateEnd) => {
-    setSyncStatus('requesting');
+  const startSync = useCallback(async (type = 'emitidos', dateStart, dateEnd, password, userId) => {
+    cancelledRef.current = false;
+    setSyncStatus('authenticating');
     setError(null);
+    setProgress({ step: 'Autenticando con el SAT...', percent: 10 });
 
     try {
-      // Simulamos 2 segundos de carga en lugar de hacer fetch al backend que truena en Netlify
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
+      // ── Step 1: Authenticate ──
+      const authResult = await satApi.satAuthenticate(password, userId);
+      if (!authResult.success) {
+        throw new Error(authResult.error || 'Error de autenticación con el SAT.');
+      }
+
+      if (cancelledRef.current) return;
+      setProgress({ step: 'Solicitando descarga al SAT...', percent: 25, rfc: authResult.rfc });
+      setSyncStatus('requesting');
+
+      // ── Step 2: Query (SolicitaDescarga) ──
+      const queryResult = await satApi.satQuery({
+        password,
+        user_id: userId,
+        type,
+        dateStart,
+        dateEnd,
+        requestType: 'metadata', // metadata is faster, xml is full content
+      });
+
+      if (!queryResult.success) {
+        throw new Error(queryResult.error || 'Error al solicitar la descarga.');
+      }
+
+      const requestId = queryResult.data?.requestId;
+      if (!requestId) {
+        throw new Error('El SAT no devolvió un ID de solicitud válido.');
+      }
+
+      if (cancelledRef.current) return;
+      setSyncStatus('verifying');
+      setProgress({ step: 'Esperando que el SAT procese...', percent: 40, requestId });
+
+      // ── Step 3: Verify (poll every 10 seconds, up to 60 attempts = 10 min) ──
+      let verifyAttempts = 0;
+      const maxAttempts = 60;
+
+      const pollVerify = () => new Promise((resolve, reject) => {
+        const check = async () => {
+          if (cancelledRef.current) {
+            reject(new Error('Sincronización cancelada.'));
+            return;
+          }
+
+          verifyAttempts++;
+          try {
+            const verifyResult = await satApi.satVerify({
+              password,
+              user_id: userId,
+              requestId,
+            });
+
+            if (!verifyResult.success) {
+              reject(new Error(verifyResult.error || 'Error verificando solicitud.'));
+              return;
+            }
+
+            const { status, packageIds, cfdiCount } = verifyResult.data;
+
+            setProgress({
+              step: `SAT procesando... (intento ${verifyAttempts}/${maxAttempts})`,
+              percent: 40 + Math.min(30, (verifyAttempts / maxAttempts) * 30),
+              status,
+              cfdiCount,
+            });
+
+            if (status === 'completed' && packageIds?.length > 0) {
+              resolve({ packageIds, cfdiCount });
+              return;
+            }
+
+            if (['error', 'rejected', 'expired'].includes(status)) {
+              reject(new Error(`El SAT rechazó la solicitud: ${verifyResult.data.message || status}`));
+              return;
+            }
+
+            if (verifyAttempts >= maxAttempts) {
+              reject(new Error('Tiempo de espera agotado. El SAT no completó la solicitud en 10 minutos.'));
+              return;
+            }
+
+            // Poll again in 10 seconds
+            pollRef.current = setTimeout(check, 10000);
+          } catch (err) {
+            reject(err);
+          }
+        };
+
+        check();
+      });
+
+      const { packageIds, cfdiCount } = await pollVerify();
+
+      if (cancelledRef.current) return;
+      setSyncStatus('downloading');
+      setProgress({
+        step: `Descargando ${packageIds.length} paquete(s) con ${cfdiCount} CFDIs...`,
+        percent: 75,
+        cfdiCount,
+      });
+
+      // ── Step 4: Download packages ──
+      const downloadResult = await satApi.satDownloadPackages({
+        password,
+        user_id: userId,
+        packageIds,
+        type,
+      });
+
+      if (!downloadResult.success) {
+        throw new Error(downloadResult.error || 'Error al descargar los paquetes.');
+      }
+
       setSyncStatus('completed');
-      setProgress({ status: 'completed', cfdiCount: 14, totalProcessed: 14 });
+      setProgress({
+        step: '¡Sincronización completada!',
+        percent: 100,
+        status: 'completed',
+        cfdiCount: downloadResult.data?.totalProcessed || cfdiCount,
+        totalProcessed: downloadResult.data?.totalProcessed || 0,
+        totalErrors: downloadResult.data?.totalErrors || 0,
+      });
     } catch (err) {
-      setSyncStatus('error');
-      setError(err.message);
+      if (!cancelledRef.current) {
+        setSyncStatus('error');
+        setError(err.message);
+        setProgress(null);
+      }
     }
   }, []);
 
   const cancelSync = useCallback(() => {
+    cancelledRef.current = true;
     if (pollRef.current) {
       clearTimeout(pollRef.current);
       pollRef.current = null;
     }
     setSyncStatus('idle');
     setProgress(null);
+    setError(null);
   }, []);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      cancelledRef.current = true;
       if (pollRef.current) clearTimeout(pollRef.current);
     };
   }, []);

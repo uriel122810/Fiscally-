@@ -3,7 +3,29 @@
   publish = "dist"
   functions = "netlify/functions"
 
-# -- Endpoints de API Mapeados Explícitamente --
+# ─── SAT Pipeline Endpoints (Serverless Functions) ───────────────
+
+[[redirects]]
+  from = "/api/sat/authenticate"
+  to = "/.netlify/functions/sat-authenticate"
+  status = 200
+
+[[redirects]]
+  from = "/api/sat/query"
+  to = "/.netlify/functions/sat-query"
+  status = 200
+
+[[redirects]]
+  from = "/api/sat/verify"
+  to = "/.netlify/functions/sat-verify"
+  status = 200
+
+[[redirects]]
+  from = "/api/sat/download"
+  to = "/.netlify/functions/sat-download"
+  status = 200
+
+# ─── Legacy Endpoints ────────────────────────────────────────────
 
 [[redirects]]
   from = "/api/health"
@@ -25,14 +47,15 @@
   to = "/.netlify/functions/cfdi"
   status = 200
 
-# -- Catch-all general para cualquier otra API (redirige limpio al manejador dinámico) --
+# ─── Catch-all para otras APIs (Dynamic Handler) ─────────────────
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
 
-# -- Fallback para Single Page Application (Vite/React) --
-# IMPORTANTE: Esto debe ir al final para no comerse las rutas /api/
+# ─── Single Page Application (SPA) Fallback ──────────────────────
+# IMPORTANTE: Esta regla debe ser la última para no atrapar 
+# las llamadas a la API y enrutar toda navegación al frontend.
 [[redirects]]
   from = "/*"
   to = "/index.html"

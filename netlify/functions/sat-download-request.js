@@ -1,8 +1,18 @@
-import { createClient } from '@supabase/supabase-js';
-import { Credential } from '@nodecfdi/credentials';
+// ─── SAT Download Request (Legacy / Deprecated) ────────────────────────
+// This function now redirects to the new sat-authenticate pipeline.
+// Kept for backward compatibility with any existing frontend calls.
+//
+// Use the new pipeline instead:
+//   1. POST /api/sat/authenticate
+//   2. POST /api/sat/query
+//   3. POST /api/sat/verify
+//   4. POST /api/sat/download-packages
+// ─────────────────────────────────────────────────────────────────────────
 
-export const handler = async (event, context) => {
-  // CORS Headers
+import { createClient } from '@supabase/supabase-js';
+import { Fiel, FielRequestBuilder, Service, HttpsWebClient, ServiceEndpoints } from '@nodecfdi/sat-ws-descarga-masiva';
+
+export const handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
@@ -15,26 +25,17 @@ export const handler = async (event, context) => {
 
   try {
     if (event.httpMethod !== 'POST') {
-      return { statusCode: 405, headers, body: JSON.stringify({ success: false, error: 'Método no permitido. Usa POST.' }) };
+      return { statusCode: 200, headers, body: JSON.stringify({ success: false, error: 'Método no permitido. Usa POST.' }) };
     }
 
-    let bodyData = {};
-    if (event.body) {
-      try {
-        bodyData = JSON.parse(event.body);
-      } catch (e) {
-        // Ignorar error de parseo, tal vez no mandaron nada
-      }
-    }
-
-    const password = bodyData.password;
-    const user_id = bodyData.user_id || '00000000-0000-0000-0000-000000000000'; // Extraer del token en prod
+    const body = JSON.parse(event.body || '{}');
+    const { password, user_id } = body;
 
     if (!password) {
       return {
-        statusCode: 200, // Status 200 para evitar 502/400 duros en Netlify
+        statusCode: 200,
         headers,
-        body: JSON.stringify({ success: false, error: 'La contraseña de la e.firma es requerida para usar el certificado.' })
+        body: JSON.stringify({ success: false, error: 'La contraseña de la e.firma es requerida.' }),
       };
     }
 
@@ -46,72 +47,67 @@ export const handler = async (event, context) => {
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
+    const uid = user_id || '00000000-0000-0000-0000-000000000000';
 
-    // 1. Obtener la configuracion_sat desde Supabase
-    const { data: configData, error: dbError } = await supabase
+    const { data: config, error: dbError } = await supabase
       .from('configuracion_sat')
-      .select('cer_base64, key_base64')
-      .eq('user_id', user_id)
+      .select('cer_base64, key_base64, rfc')
+      .eq('user_id', uid)
       .maybeSingle();
 
-    if (dbError || !configData || !configData.cer_base64 || !configData.key_base64) {
+    if (dbError || !config?.cer_base64 || !config?.key_base64) {
       return {
         statusCode: 200,
         headers,
-        body: JSON.stringify({ success: false, error: 'No se encontraron las credenciales e.firma para este usuario. Configúralas primero.' })
+        body: JSON.stringify({ success: false, error: 'Credenciales e.firma no encontradas.' }),
       };
     }
 
-    // 2. Reconstruir los Buffers binarios en memoria a partir del Base64
-    const cerBuffer = Buffer.from(configData.cer_base64, 'base64');
-    const keyBuffer = Buffer.from(configData.key_base64, 'base64');
+    // Use the correct @nodecfdi API to validate credentials
+    const cerBinary = Buffer.from(config.cer_base64, 'base64').toString('binary');
+    const keyBinary = Buffer.from(config.key_base64, 'base64').toString('binary');
 
-    // 3. Probar la e.firma y extraer datos reales
-    let rfc, serie_certificado;
-    try {
-      const credential = Credential.openFiles(
-        cerBuffer.toString('binary'),
-        keyBuffer.toString('binary'),
-        password
-      );
+    const fiel = Fiel.create(cerBinary, keyBinary, password);
 
-      rfc = credential.rfc();
-      serie_certificado = credential.certificate().serialNumber().bytes();
-
-    } catch (authError) {
+    if (!fiel.isValid()) {
       return {
         statusCode: 200,
         headers,
-        body: JSON.stringify({ success: false, error: 'Contraseña de e.firma incorrecta o archivos corruptos.' })
+        body: JSON.stringify({ success: false, error: 'La e.firma no es válida o ha expirado.' }),
       };
     }
 
-    // 4. Aquí iría el código real para comunicarse con el SAT Web Service (ej. FielApiClient)
-    // usando rfc, cerBuffer, keyBuffer y password.
-    // ...
+    // Authenticate with SAT
+    const requestBuilder = new FielRequestBuilder(fiel);
+    const webClient = new HttpsWebClient();
+    const endpoints = ServiceEndpoints.cfdi();
+    const service = new Service(requestBuilder, webClient, endpoints);
+
+    await service.authenticate();
+
+    let rfc = config.rfc || 'N/A';
+    try { rfc = fiel.getRfc(); } catch { /* use DB rfc */ }
 
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         success: true,
-        message: `Conexión al SAT simulada con éxito para RFC: ${rfc}`,
-        serie_certificado,
-        requestId: 'REQ-MOCK-' + Math.floor(Math.random() * 1000000),
-        status: 'accepted'
-      })
+        message: `Conexión al SAT exitosa para RFC: ${rfc}`,
+        rfc,
+        status: 'authenticated',
+        info: 'Este endpoint es legacy. Usa /api/sat/authenticate para el nuevo pipeline.',
+      }),
     };
-
   } catch (error) {
-    console.error('[SAT Download Error]', error);
-    // Manejo absoluto para evitar 502/Crash
+    console.error('[SAT Download Request Error]', error);
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         success: false,
-        error: error.message || 'Error interno al procesar la solicitud de descarga.'
-      })
+        error: error.message || 'Error interno al procesar la solicitud.',
+      }),
     };
   }
 };

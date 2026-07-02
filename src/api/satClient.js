@@ -1,17 +1,45 @@
 // ─── SAT API Client ─────────────────────────────────────────────────────
 // HTTP client wrapper for all backend SAT API calls.
-// Used by React hooks to fetch real CFDI data from the Express backend
-// OR from Supabase Edge Functions.
+// Supports two modes:
+//   1. Supabase Edge Functions (production on Netlify)
+//   2. Local Express backend (development with Vite proxy)
 // ─────────────────────────────────────────────────────────────────────────
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Si existe configuración de Supabase, arma la URL hacia las Edge Functions
-// Formato: https://<PROJECT_REF>.supabase.co/functions/v1/sat
-const API_BASE = supabaseUrl 
-  ? `${supabaseUrl}/functions/v1/sat` 
-  : '/api/sat';
+// Determinar si estamos usando Supabase Edge Functions como backend
+const isSupabaseMode = !!(supabaseUrl && supabaseKey);
+
+// En modo Supabase:  https://<PROJECT_REF>.supabase.co/functions/v1
+// En modo local:     '' (rutas relativas como /api/sat/...)
+const FUNCTIONS_BASE = isSupabaseMode
+  ? `${supabaseUrl.replace(/\/$/, '')}/functions/v1`
+  : '';
+
+// Base para las rutas de API SAT
+// Supabase: https://<ref>.supabase.co/functions/v1/sat-sync  (cada función es un nombre)
+// Local:    /api/sat
+const API_BASE = isSupabaseMode ? `${FUNCTIONS_BASE}/sat` : '/api/sat';
+
+/**
+ * Construye una URL completa a partir de un path.
+ * Si el path ya es absoluto (https://...), lo devuelve tal cual.
+ * Si es relativo (/api/...), lo resuelve contra window.location.origin.
+ */
+function buildUrl(path, params = {}) {
+  // Si el path ya contiene un protocolo, es una URL absoluta (modo Supabase)
+  const isAbsolute = path.startsWith('http://') || path.startsWith('https://');
+  const url = isAbsolute ? new URL(path) : new URL(path, window.location.origin);
+
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      url.searchParams.set(key, String(value));
+    }
+  });
+
+  return url.toString();
+}
 
 /**
  * Base fetch wrapper with error handling.
@@ -22,9 +50,10 @@ async function request(url, options = {}) {
     ...options.headers,
   };
 
-  // Inyectar el token de autenticación para Supabase Edge Functions si está disponible
-  if (supabaseUrl && supabaseKey) {
+  // Inyectar Authorization para Supabase Edge Functions
+  if (isSupabaseMode) {
     headers['Authorization'] = `Bearer ${supabaseKey}`;
+    headers['apikey'] = supabaseKey;
   }
 
   try {
@@ -50,8 +79,13 @@ async function request(url, options = {}) {
 
     return data;
   } catch (error) {
+    // Generar un mensaje de error contextual según el modo de operación
     if (error.name === 'TypeError' && error.message.includes('fetch')) {
-      throw new Error('No se pudo conectar al servidor backend. ¿Está corriendo el servidor en el puerto 3001?');
+      if (isSupabaseMode) {
+        throw new Error(`No se pudo conectar a Supabase Edge Functions. Verifica que VITE_SUPABASE_URL sea correcto.`);
+      } else {
+        throw new Error('No se pudo conectar al servidor backend. ¿Está corriendo el servidor en el puerto 3001?');
+      }
     }
     throw error;
   }
@@ -61,20 +95,14 @@ async function request(url, options = {}) {
  * GET request helper.
  */
 async function get(path, params = {}) {
-  const url = new URL(path, window.location.origin);
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== '') {
-      url.searchParams.set(key, value);
-    }
-  });
-  return request(url.toString());
+  return request(buildUrl(path, params));
 }
 
 /**
  * POST request helper.
  */
 async function post(path, body = {}) {
-  return request(`${window.location.origin}${path}`, {
+  return request(buildUrl(path), {
     method: 'POST',
     body: JSON.stringify(body),
   });
@@ -84,7 +112,7 @@ async function post(path, body = {}) {
  * Download file helper — triggers browser download.
  */
 async function downloadFile(path, filename) {
-  const response = await request(`${window.location.origin}${path}`, {
+  const response = await request(buildUrl(path), {
     responseType: 'blob',
   });
 
@@ -104,9 +132,17 @@ async function downloadFile(path, filename) {
 export const satApi = {
   // ── Health ────────────────────────────────────────────────────────
   /**
-   * Check if the backend server is running.
+   * Check if the backend is reachable.
+   * En modo Supabase, llama a la Edge Function /sat/health.
+   * En modo local, llama a /api/health.
    */
-  health: () => get('/api/health'),
+  health: () => {
+    if (isSupabaseMode) {
+      // Probar conectividad a Supabase llamando al endpoint de la función SAT
+      return get(`${API_BASE}/health`);
+    }
+    return get('/api/health');
+  },
 
   // ── Auth ──────────────────────────────────────────────────────────
   /**
@@ -129,10 +165,19 @@ export const satApi = {
     formData.append('key', keyFile);
     formData.append('password', password);
 
-    const response = await fetch(`${API_BASE}/auth/upload-efirma`, {
+    const url = buildUrl(`${API_BASE}/auth/upload-efirma`);
+    const headers = {};
+
+    // Para FormData, NO establecer Content-Type (el browser pone el boundary)
+    if (isSupabaseMode) {
+      headers['Authorization'] = `Bearer ${supabaseKey}`;
+      headers['apikey'] = supabaseKey;
+    }
+
+    const response = await fetch(url, {
       method: 'POST',
       body: formData,
-      // Don't set Content-Type — browser sets it with boundary for FormData
+      headers,
     });
 
     const data = await response.json();
@@ -175,25 +220,60 @@ export const satApi = {
     alert(`📑 Simulación: Descargando ${filename || `${uuid}.pdf`}`);
   },
 
-  // ── SAT Download Management ───────────────────────────────────────
+  // ── SAT Download Management (Legacy) ────────────────────────────────
   /**
-   * Request a bulk download from SAT.
+   * Request a bulk download from SAT (legacy — simulated).
    * @param {object} params - { type: 'emitidos'|'recibidos', dateStart, dateEnd, requestType }
    */
   requestDownload: (params) => post(`${API_BASE}/download/request`, params),
 
   /**
-   * Verify download request status.
+   * Verify download request status (legacy).
    */
   verifyDownload: (requestId) => get(`${API_BASE}/download/verify/${requestId}`),
 
   /**
-   * Fetch and process completed packages.
+   * Fetch and process completed packages (legacy).
    */
   fetchPackages: (requestId) => post(`${API_BASE}/download/fetch/${requestId}`),
 
   /**
-   * Get download history.
+   * Get download history (legacy).
    */
   getDownloadHistory: () => get(`${API_BASE}/download/history`),
+
+  // ── SAT Real Pipeline (New — @nodecfdi) ───────────────────────────
+  /**
+   * Authenticate with SAT using e.firma credentials.
+   * @param {string} password - e.firma password
+   * @param {string} userId - Supabase user ID
+   * @returns {{ success, rfc, certificateExpiration, tokenObtained }}
+   */
+  satAuthenticate: (password, userId) =>
+    post('/api/sat/authenticate', { password, user_id: userId }),
+
+  /**
+   * Request a bulk download from SAT (SolicitaDescarga).
+   * @param {object} params - { password, user_id, type, dateStart, dateEnd, requestType }
+   * @returns {{ success, data: { requestId, statusCode, message } }}
+   */
+  satQuery: (params) =>
+    post('/api/sat/query', params),
+
+  /**
+   * Verify the status of a SAT download request (VerificaSolicitudDescarga).
+   * @param {object} params - { password, user_id, requestId }
+   * @returns {{ success, data: { status, packageIds, cfdiCount } }}
+   */
+  satVerify: (params) =>
+    post('/api/sat/verify', params),
+
+  /**
+   * Download and process completed packages from SAT (DescargaMasiva).
+   * Extracts XMLs/metadata, parses them, and stores in Supabase.
+   * @param {object} params - { password, user_id, packageIds, type }
+   * @returns {{ success, data: { totalProcessed, totalErrors } }}
+   */
+  satDownloadPackages: (params) =>
+    post('/api/sat/download-packages', params),
 };
