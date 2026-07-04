@@ -134,7 +134,7 @@ export const handler = async (event: any, context: any) => {
 
     let rfc, serie_certificado, fecha_vencimiento;
     try {
-      const credential = Credential.openFiles(
+      const credential = Credential.create(
         cerBuffer.toString('binary'),
         keyBuffer.toString('binary'),
         password

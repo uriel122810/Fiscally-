@@ -57,7 +57,7 @@ export const handler = async (event: any, context: any) => {
     // 2. Extraer datos del certificado con NodeCFDI
     let rfc, serie_certificado, fecha_vencimiento;
     try {
-      const credential = Credential.openFiles(
+      const credential = Credential.create(
         Buffer.from(cer_base64, 'base64').toString('binary'),
         Buffer.from(key_base64, 'base64').toString('binary'),
         password
