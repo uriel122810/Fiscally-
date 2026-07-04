@@ -27,7 +27,7 @@ async function loadCredentialSafely(blobKey: string, defaultLocalPath: string, t
   // 2. Entorno de Producción (Netlify Blobs)
   try {
     const store = getStore('fiscally-sat-credentials');
-    const base64Data = await store.get(blobKey);
+    const base64Data = await store.get(blobKey, { type: 'text' });
     
     if (base64Data) {
       const cleanBase64 = base64Data.replace(/^data:[a-zA-Z0-9-+/.]+;base64,/, '');
@@ -158,14 +158,15 @@ export const handler = async (event: any, context: any) => {
 
     // E) Sincronizar exitosamente con Supabase
     if (supabase) {
-      await supabase.from('configuracion_sat').upsert({
+      const { error: upsertError } = await supabase.from('configuracion_sat').upsert({
         rfc,
         user_id,
         cer_configurado: true,
         key_configurado: true,
         serie_certificado,
         fecha_vencimiento
-      }, { onConflict: 'user_id' }).catch(() => { /* ignorar fallo silencioso de BD */ });
+      }, { onConflict: 'user_id' });
+      if (upsertError) console.warn('[SAT Config] Upsert falló (ignorado):', upsertError.message);
     }
 
     // F) Retornar estado final exitoso
