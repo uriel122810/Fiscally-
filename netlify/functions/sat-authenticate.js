@@ -92,15 +92,15 @@ export const handler = async (event) => {
       .from('configuracion_sat')
       .select('cer_base64, key_base64, rfc')
       .eq('user_id', uid)
-      .maybeSingle();
+      .single();
 
-    if (dbError || !config?.cer_base64 || !config?.key_base64) {
+    if (dbError || !config || !config.cer_base64 || !config.key_base64) {
       return {
-        statusCode: 200,
+        statusCode: 400,
         headers: CORS_HEADERS,
         body: JSON.stringify({
           success: false,
-          error: 'No se encontraron las credenciales e.firma. Configúralas primero en Settings.',
+          error: 'Error en BD o permisos RLS: ' + (dbError?.message || 'No data'),
         }),
       };
     }
@@ -136,16 +136,10 @@ export const handler = async (event) => {
   } catch (error) {
     console.error('[SAT Authenticate Error]', error);
 
-    // Provide more specific error messages for common failures
-    let userMessage = error.message || 'Error interno al autenticar con el SAT.';
-    if (error.message?.includes('password') || error.message?.includes('decrypt')) {
-      userMessage = 'Contraseña de e.firma incorrecta. Verifica e intenta de nuevo.';
-    }
-
     return {
-      statusCode: 200,
+      statusCode: 400,
       headers: CORS_HEADERS,
-      body: JSON.stringify({ success: false, error: userMessage }),
+      body: JSON.stringify({ success: false, error: error.message || 'Error interno desconocido' }),
     };
   }
 };
