@@ -1,5 +1,4 @@
 import { createClient } from '@supabase/supabase-js';
-import { Certificate } from '@nodecfdi/credentials';
 
 export const handler = async (event: any, context: any) => {
   // CORS Headers
@@ -44,36 +43,20 @@ export const handler = async (event: any, context: any) => {
       };
     }
 
-    const { cer_base64, key_base64, user_id } = bodyData;
+    const { cer_base64, key_base64, rfc, user_id } = bodyData;
 
-    if (!cer_base64 || !key_base64) {
+    if (!cer_base64 || !key_base64 || !rfc) {
       return {
         statusCode: 200,
         headers,
-        body: JSON.stringify({ success: false, error: 'Faltan archivos (cer_base64, key_base64).' })
+        body: JSON.stringify({ success: false, error: 'Faltan datos (cer_base64, key_base64, rfc).' })
       };
     }
 
-    // Limpiar prefijos data-URL para garantizar Base64 puro
-    const pureCer = cer_base64.replace(/^data:.*;base64,/, '');
-    const pureKey = key_base64.replace(/^data:.*;base64,/, '');
-
-    // 2. Extraer datos leyendo ÚNICAMENTE el certificado (.cer no requiere contraseña;
-    // la llave .key se valida después, en sat-authenticate, donde sí llega el password)
-    let rfc, serie_certificado, fecha_vencimiento;
-    try {
-      const cert = new Certificate(Buffer.from(pureCer, 'base64').toString('binary'));
-
-      rfc = cert.rfc();
-      serie_certificado = cert.serialNumber().bytes();
-      fecha_vencimiento = cert.validTo().toISOString();
-    } catch (parseError: any) {
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({ success: false, error: 'No se pudo procesar el certificado (.cer inválido o corrupto).' })
-      };
-    }
+    // 2. Pasatubos seguro: sin validación criptográfica aquí (no hay contraseña
+    // en este endpoint). Solo limpieza agresiva de prefijos data-URL.
+    const pureCer = cer_base64.replace(/^data:.*?;base64,/, '');
+    const pureKey = key_base64.replace(/^data:.*?;base64,/, '');
 
     // 3. Guardar de forma segura en Netlify Blobs y en Supabase (Bloque try/catch impermeable)
     const supabaseUrl = process.env.SUPABASE_URL;
@@ -93,14 +76,12 @@ export const handler = async (event: any, context: any) => {
         const { error: upsertError } = await supabase
           .from('configuracion_sat')
           .upsert({
-            rfc,
             user_id: uid,
+            rfc,
             cer_base64: pureCer,
             key_base64: pureKey,
             cer_configurado: true,
-            key_configurado: true,
-            serie_certificado,
-            fecha_vencimiento
+            key_configurado: true
           }, { onConflict: 'user_id' });
 
         if (upsertError) {

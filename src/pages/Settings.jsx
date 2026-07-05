@@ -279,8 +279,11 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
       alert('Selecciona ambos archivos (.cer y .key) antes de actualizar.');
       return;
     }
-    const password = satPassword || window.prompt('Contraseña de tu e.firma:');
-    if (!password) return;
+    const rfc = netlifyConfig.data?.rfc || companyData.rfc;
+    if (!rfc) {
+      alert('No se encontró el RFC del usuario. Configúralo primero en Empresa.');
+      return;
+    }
 
     setUploadingEfirma(true);
     try {
@@ -292,7 +295,7 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
       const res = await fetch('/.netlify/functions/upload-efirma', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cer_base64, key_base64, password, user_id: session?.user?.id }),
+        body: JSON.stringify({ cer_base64, key_base64, rfc, user_id: session?.user?.id }),
       });
       const data = await res.json();
 
