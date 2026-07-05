@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Credential } from '@nodecfdi/credentials';
+import { Certificate } from '@nodecfdi/credentials';
 
 export const handler = async (event: any, context: any) => {
   // CORS Headers
@@ -44,34 +44,34 @@ export const handler = async (event: any, context: any) => {
       };
     }
 
-    const { cer_base64, key_base64, password, user_id } = bodyData;
+    const { cer_base64, key_base64, user_id } = bodyData;
 
-    if (!cer_base64 || !key_base64 || !password) {
+    if (!cer_base64 || !key_base64) {
       return {
         statusCode: 200,
         headers,
-        body: JSON.stringify({ success: false, error: 'Faltan archivos (cer_base64, key_base64) o la contraseña.' })
+        body: JSON.stringify({ success: false, error: 'Faltan archivos (cer_base64, key_base64).' })
       };
     }
 
-    // 2. Extraer datos del certificado con NodeCFDI
+    // Limpiar prefijos data-URL para garantizar Base64 puro
+    const pureCer = cer_base64.replace(/^data:.*;base64,/, '');
+    const pureKey = key_base64.replace(/^data:.*;base64,/, '');
+
+    // 2. Extraer datos leyendo ÚNICAMENTE el certificado (.cer no requiere contraseña;
+    // la llave .key se valida después, en sat-authenticate, donde sí llega el password)
     let rfc, serie_certificado, fecha_vencimiento;
     try {
-      const credential = Credential.create(
-        Buffer.from(cer_base64, 'base64').toString('binary'),
-        Buffer.from(key_base64, 'base64').toString('binary'),
-        password
-      );
+      const cert = new Certificate(Buffer.from(pureCer, 'base64').toString('binary'));
 
-      rfc = credential.rfc();
-      serie_certificado = credential.certificate().serialNumber().bytes();
-      fecha_vencimiento = credential.certificate().validTo().toISOString();
+      rfc = cert.rfc();
+      serie_certificado = cert.serialNumber().bytes();
+      fecha_vencimiento = cert.validTo().toISOString();
     } catch (parseError: any) {
-      // Retorna 200 con success: false si la contraseña es incorrecta o los archivos son inválidos
       return {
         statusCode: 200,
         headers,
-        body: JSON.stringify({ success: false, error: 'No se pudo procesar la firma electrónica. Contraseña incorrecta o certificado inválido.' })
+        body: JSON.stringify({ success: false, error: 'No se pudo procesar el certificado (.cer inválido o corrupto).' })
       };
     }
 
@@ -85,8 +85,8 @@ export const handler = async (event: any, context: any) => {
         // Almacenar en Netlify Blobs
         const { getStore } = await import('@netlify/blobs');
         const store = getStore('fiscally-sat-credentials');
-        await store.set('cer_data', cer_base64);
-        await store.set('key_data', key_base64);
+        await store.set('cer_data', pureCer);
+        await store.set('key_data', pureKey);
         
         // Upsert en la tabla 'configuracion_sat' de Supabase
         const supabase = createClient(supabaseUrl, supabaseKey);
@@ -95,8 +95,8 @@ export const handler = async (event: any, context: any) => {
           .upsert({
             rfc,
             user_id: uid,
-            cer_base64,
-            key_base64,
+            cer_base64: pureCer,
+            key_base64: pureKey,
             cer_configurado: true,
             key_configurado: true,
             serie_certificado,
