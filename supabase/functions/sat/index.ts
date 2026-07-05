@@ -9,7 +9,6 @@
 // ya hacen netlify/functions/sat-authenticate.js, sat-query.js, etc.
 // ─────────────────────────────────────────────────────────────────────────
 
-import { Buffer } from 'node:buffer';
 import { createClient } from '@supabase/supabase-js';
 import { Fiel } from '@nodecfdi/sat-ws-descarga-masiva';
 import { Credential } from '@nodecfdi/credentials';
@@ -23,6 +22,17 @@ const CORS_HEADERS = {
 function jsonResponse(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: CORS_HEADERS });
 }
+
+const formatPEM = (base64: string, type: 'cer' | 'key') => {
+  const cleanBase64 = base64.replace(/^data:.*?;base64,/, '').replace(/\s/g, '');
+  const chunks = cleanBase64.match(/.{1,64}/g)?.join('\n') || cleanBase64;
+  if (type === 'cer') {
+    return `-----BEGIN CERTIFICATE-----\n${chunks}\n-----END CERTIFICATE-----`;
+  } else {
+    // El SAT usa llaves PKCS#8 encriptadas
+    return `-----BEGIN ENCRYPTED PRIVATE KEY-----\n${chunks}\n-----END ENCRYPTED PRIVATE KEY-----`;
+  }
+};
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -78,16 +88,12 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // Limpiar el Base64 de cualquier basura del frontend
-    const pureCer = config.cer_base64.replace(/^data:.*?;base64,/, '').replace(/\s/g, '');
-    const pureKey = config.key_base64.replace(/^data:.*?;base64,/, '').replace(/\s/g, '');
-
-    // Usar el Buffer de Node para decodificar a 'latin1' (el formato estricto que exige nodecfdi)
-    const cerBinary = Buffer.from(pureCer, 'base64').toString('latin1');
-    const keyBinary = Buffer.from(pureKey, 'base64').toString('latin1');
+    // Base64 (DER) → PEM (texto puro), evitando manipular binarios en Deno.
+    const cerPem = formatPEM(config.cer_base64, 'cer');
+    const keyPem = formatPEM(config.key_base64, 'key');
 
     // Fiel: objeto de autenticación para el Web Service de Descarga Masiva.
-    const fiel = Fiel.create(cerBinary, keyBinary, password);
+    const fiel = Fiel.create(cerPem, keyPem, password);
 
     if (!fiel.isValid()) {
       return jsonResponse({
@@ -101,7 +107,7 @@ Deno.serve(async (req: Request) => {
     // Credential.openFiles() — pese al nombre "openFiles" acepta rutas de
     // archivo y lee de disco vía node:fs, lo cual rompería en Deno/Edge
     // Functions y viola el requisito de no tocar el sistema de archivos.
-    const credential = Credential.create(cerBinary, keyBinary, password);
+    const credential = Credential.create(cerPem, keyPem, password);
 
     return jsonResponse({
       success: true,
