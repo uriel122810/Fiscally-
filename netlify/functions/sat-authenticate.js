@@ -6,7 +6,6 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { createClient } from '@supabase/supabase-js';
-import { Fiel, FielRequestBuilder, Service, HttpsWebClient, ServiceEndpoints } from '@nodecfdi/sat-ws-descarga-masiva';
 
 // CORS headers for all responses
 const CORS_HEADERS = {
@@ -26,7 +25,12 @@ const CORS_HEADERS = {
  * @param {string} password - Password to decrypt the .key file
  * @returns {{ service: Service, fiel: Fiel }}
  */
-function buildSatService(cerBase64, keyBase64, password) {
+async function buildSatService(cerBase64, keyBase64, password) {
+  // Importación dinámica para evitar el error ESM/CommonJS de Netlify
+  // (require of ES Module not supported) con @nodecfdi/sat-ws-descarga-masiva.
+  const { Fiel, FielRequestBuilder, Service, HttpsWebClient, ServiceEndpoints } =
+    await import('@nodecfdi/sat-ws-descarga-masiva');
+
   // Decode Base64 → Buffer → binary string (latin1, as expected by Fiel.create)
   const cerBinary = Buffer.from(cerBase64, 'base64').toString('binary');
   const keyBinary = Buffer.from(keyBase64, 'base64').toString('binary');
@@ -106,7 +110,7 @@ export const handler = async (event) => {
     }
 
     // 2. Build the SAT service and authenticate
-    const { service, fiel } = buildSatService(
+    const { service, fiel } = await buildSatService(
       config.cer_base64,
       config.key_base64,
       password,
