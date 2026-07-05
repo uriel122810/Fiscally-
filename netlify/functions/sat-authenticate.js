@@ -92,13 +92,13 @@ export const handler = async (event) => {
     const supabase = createClient(supabaseUrl, supabaseKey);
     const uid = user_id || '00000000-0000-0000-0000-000000000000';
 
-    const { data: config, error: dbError } = await supabase
+    const { data, error: dbError } = await supabase
       .from('configuracion_sat')
       .select('cer_base64, key_base64, rfc')
       .eq('user_id', uid)
-      .single();
+      .limit(1);
 
-    if (dbError || !config || !config.cer_base64 || !config.key_base64) {
+    if (dbError || !data || data.length === 0 || !data[0].cer_base64 || !data[0].key_base64) {
       return {
         statusCode: 400,
         headers: CORS_HEADERS,
@@ -108,6 +108,8 @@ export const handler = async (event) => {
         }),
       };
     }
+
+    const config = data[0];
 
     // 2. Build the SAT service and authenticate
     const { service, fiel } = await buildSatService(
