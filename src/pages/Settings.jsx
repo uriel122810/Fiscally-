@@ -292,21 +292,31 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
         fileToBase64(keyFile),
       ]);
 
-      const res = await fetch('/.netlify/functions/upload-efirma', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cer_base64, key_base64, rfc, user_id: session?.user?.id }),
-      });
-      const data = await res.json();
+      const pureCer = cer_base64.replace(/^data:.*?;base64,/, '');
+      const pureKey = key_base64.replace(/^data:.*?;base64,/, '');
 
-      if (data.success) {
-        alert('✅ Certificado actualizado con éxito');
-        setCerFile(null);
-        setKeyFile(null);
-        fetchSupabaseConfig(session.user.id);
-      } else {
-        alert(`❌ Error: ${data.error || 'No se pudo actualizar el certificado'}`);
+      const { supabase } = await import('../api/supabaseClient');
+      if (!supabase) throw new Error('Cliente de Supabase no disponible.');
+
+      const { error } = await supabase.from('configuracion_sat').upsert({
+        user_id: session?.user?.id,
+        rfc,
+        cer_base64: pureCer,
+        key_base64: pureKey,
+        cer_configurado: true,
+        key_configurado: true
+      }, { onConflict: 'user_id' });
+
+      if (error) {
+        alert('Error guardando en la nube: ' + error.message);
+        setUploadingEfirma(false);
+        return;
       }
+
+      alert('✅ Certificado actualizado con éxito');
+      setCerFile(null);
+      setKeyFile(null);
+      fetchSupabaseConfig(session.user.id);
     } catch (err) {
       alert(`❌ Error: ${err.message}`);
     }
