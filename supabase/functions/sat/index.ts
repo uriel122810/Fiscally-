@@ -9,6 +9,7 @@
 // ya hacen netlify/functions/sat-authenticate.js, sat-query.js, etc.
 // ─────────────────────────────────────────────────────────────────────────
 
+import { Buffer } from 'node:buffer';
 import { createClient } from '@supabase/supabase-js';
 import { Fiel } from '@nodecfdi/sat-ws-descarga-masiva';
 import { Credential } from '@nodecfdi/credentials';
@@ -22,29 +23,6 @@ const CORS_HEADERS = {
 function jsonResponse(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: CORS_HEADERS });
 }
-
-// Base64 → bytes reales. Limpia prefijos data-URL y whitespace/saltos de línea,
-// que hacen que atob() truene en Deno (a diferencia de Buffer.from en Node).
-const base64ToUint8Array = (base64: string) => {
-  const cleaned = base64.replace(/^data:.*?;base64,/, '').replace(/\s/g, '');
-  const binaryString = atob(cleaned);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes;
-};
-
-// @nodecfdi/credentials espera "binary strings" (latin1) — su PemExtractor usa
-// regex/replaceAll sobre string, por lo que un Uint8Array crudo truena. NO usar
-// TextDecoder('latin1') aquí: remapea 0x80–0x9F (windows-1252) y corrompe el DER.
-const uint8ArrayToBinaryString = (bytes: Uint8Array) => {
-  let out = '';
-  for (let i = 0; i < bytes.length; i++) {
-    out += String.fromCharCode(bytes[i]);
-  }
-  return out;
-};
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -100,11 +78,13 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // Base64 → Uint8Array real → binary string (latin1), todo en memoria.
-    const cerBytes = base64ToUint8Array(config.cer_base64);
-    const keyBytes = base64ToUint8Array(config.key_base64);
-    const cerBinary = uint8ArrayToBinaryString(cerBytes);
-    const keyBinary = uint8ArrayToBinaryString(keyBytes);
+    // Limpiar el Base64 de cualquier basura del frontend
+    const pureCer = config.cer_base64.replace(/^data:.*?;base64,/, '').replace(/\s/g, '');
+    const pureKey = config.key_base64.replace(/^data:.*?;base64,/, '').replace(/\s/g, '');
+
+    // Usar el Buffer de Node para decodificar a 'latin1' (el formato estricto que exige nodecfdi)
+    const cerBinary = Buffer.from(pureCer, 'base64').toString('latin1');
+    const keyBinary = Buffer.from(pureKey, 'base64').toString('latin1');
 
     // Fiel: objeto de autenticación para el Web Service de Descarga Masiva.
     const fiel = Fiel.create(cerBinary, keyBinary, password);
