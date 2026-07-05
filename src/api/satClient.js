@@ -250,7 +250,7 @@ export const satApi = {
    * @returns {{ success, rfc, certificateExpiration, tokenObtained }}
    */
   satAuthenticate: (password, userId) =>
-    post(`${API_BASE}/authenticate`, { password, user_id: userId }),
+    post('/api/sat/authenticate', { password, user_id: userId }),
 
   /**
    * Request a bulk download from SAT (SolicitaDescarga).
@@ -258,7 +258,7 @@ export const satApi = {
    * @returns {{ success, data: { requestId, statusCode, message } }}
    */
   satQuery: (params) =>
-    post(`${API_BASE}/query`, params),
+    post('/api/sat/query', params),
 
   /**
    * Verify the status of a SAT download request (VerificaSolicitudDescarga).
@@ -266,7 +266,7 @@ export const satApi = {
    * @returns {{ success, data: { status, packageIds, cfdiCount } }}
    */
   satVerify: (params) =>
-    post(`${API_BASE}/verify`, params),
+    post('/api/sat/verify', params),
 
   /**
    * Download and process completed packages from SAT (DescargaMasiva).
@@ -275,5 +275,5 @@ export const satApi = {
    * @returns {{ success, data: { totalProcessed, totalErrors } }}
    */
   satDownloadPackages: (params) =>
-    post(`${API_BASE}/download-packages`, params),
+    post('/api/sat/download-packages', params),
 };
