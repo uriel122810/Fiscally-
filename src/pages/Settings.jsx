@@ -69,6 +69,13 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
   const [satConnecting, setSatConnecting] = useState(false);
   const [satConnectionResult, setSatConnectionResult] = useState(null);
 
+  // e.firma Upload States
+  const [cerFile, setCerFile] = useState(null);
+  const [keyFile, setKeyFile] = useState(null);
+  const [uploadingEfirma, setUploadingEfirma] = useState(false);
+  const cerInputRef = useRef(null);
+  const keyInputRef = useRef(null);
+
   // 1. ESCUCHA DE SESIÓN ACTIVA (onAuthStateChange)
   useEffect(() => {
     let authListener = null;
@@ -258,6 +265,49 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
       if (onUpdateLogo) onUpdateLogo(fallbackUrl);
       alert('Fallo al guardar en la nube por permisos. Se ha aplicado un logo dinámico localmente.');
     }
+  };
+
+  const fileToBase64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1]);
+    reader.onerror = () => reject(new Error(`No se pudo leer ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+
+  const handleUpdateCertificate = async () => {
+    if (!cerFile || !keyFile) {
+      alert('Selecciona ambos archivos (.cer y .key) antes de actualizar.');
+      return;
+    }
+    const password = satPassword || window.prompt('Contraseña de tu e.firma:');
+    if (!password) return;
+
+    setUploadingEfirma(true);
+    try {
+      const [cer_base64, key_base64] = await Promise.all([
+        fileToBase64(cerFile),
+        fileToBase64(keyFile),
+      ]);
+
+      const res = await fetch('/.netlify/functions/upload-efirma', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cer_base64, key_base64, password, user_id: session?.user?.id }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        alert('✅ Certificado actualizado con éxito');
+        setCerFile(null);
+        setKeyFile(null);
+        fetchSupabaseConfig(session.user.id);
+      } else {
+        alert(`❌ Error: ${data.error || 'No se pudo actualizar el certificado'}`);
+      }
+    } catch (err) {
+      alert(`❌ Error: ${err.message}`);
+    }
+    setUploadingEfirma(false);
   };
 
   const sections = [
@@ -545,26 +595,42 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
                       </button>
 
                       {/* Botones administrativos protegidos por rol */}
-                      <button 
+                      <input
+                        type="file"
+                        ref={cerInputRef}
+                        accept=".cer"
+                        style={{ display: 'none' }}
+                        onChange={(e) => setCerFile(e.target.files[0] || null)}
+                      />
+                      <input
+                        type="file"
+                        ref={keyInputRef}
+                        accept=".key"
+                        style={{ display: 'none' }}
+                        onChange={(e) => setKeyFile(e.target.files[0] || null)}
+                      />
+                      <button
                         className="btn btn-secondary"
                         disabled={!isAdmin}
-                        onClick={() => isAdmin && alert("Sube tu archivo .cer")}
+                        onClick={() => isAdmin && cerInputRef.current?.click()}
                       >
-                        <Upload size={14} /> Subir .cer
+                        <Upload size={14} /> {cerFile ? `✓ ${cerFile.name}` : 'Subir .cer'}
                       </button>
-                      <button 
+                      <button
                         className="btn btn-secondary"
                         disabled={!isAdmin}
-                        onClick={() => isAdmin && alert("Sube tu archivo .key")}
+                        onClick={() => isAdmin && keyInputRef.current?.click()}
                       >
-                        <Upload size={14} /> Subir .key
+                        <Upload size={14} /> {keyFile ? `✓ ${keyFile.name}` : 'Subir .key'}
                       </button>
-                      <button 
+                      <button
                         className="btn btn-primary"
                         style={{ marginLeft: 'auto', background: 'var(--accent-600)', borderColor: 'var(--accent-600)' }}
-                        disabled={!isAdmin}
+                        disabled={!isAdmin || uploadingEfirma || !cerFile || !keyFile}
+                        onClick={handleUpdateCertificate}
                       >
-                        Actualizar Certificado
+                        {uploadingEfirma && <Loader2 size={14} className="spin-icon" />}
+                        {uploadingEfirma ? 'Actualizando...' : 'Actualizar Certificado'}
                       </button>
                     </div>
                   </>
