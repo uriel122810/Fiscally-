@@ -95,6 +95,8 @@ export const handler = async (event: any, context: any) => {
           .upsert({
             rfc,
             user_id: uid,
+            cer_base64,
+            key_base64,
             cer_configurado: true,
             key_configurado: true,
             serie_certificado,
