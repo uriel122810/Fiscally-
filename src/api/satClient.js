@@ -50,9 +50,10 @@ async function request(url, options = {}) {
     ...options.headers,
   };
 
-  // Inyectar Authorization para Supabase Edge Functions
+  // Inyectar Authorization para Supabase Edge Functions.
+  // Si el caller ya mandó un Authorization (JWT del usuario para RLS), respetarlo.
   if (isSupabaseMode) {
-    headers['Authorization'] = `Bearer ${supabaseKey}`;
+    if (!headers['Authorization']) headers['Authorization'] = `Bearer ${supabaseKey}`;
     headers['apikey'] = supabaseKey;
   }
 
@@ -101,11 +102,27 @@ async function get(path, params = {}) {
 /**
  * POST request helper.
  */
-async function post(path, body = {}) {
+async function post(path, body = {}, headers = {}) {
   return request(buildUrl(path), {
     method: 'POST',
     body: JSON.stringify(body),
+    headers,
   });
+}
+
+/**
+ * Obtiene el JWT de la sesión activa de Supabase para autorizar el RLS.
+ */
+async function getSupabaseAuthHeader() {
+  try {
+    const { supabase } = await import('./supabaseClient');
+    if (!supabase) return {};
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -249,24 +266,24 @@ export const satApi = {
    * @param {string} userId - Supabase user ID
    * @returns {{ success, rfc, certificateExpiration, tokenObtained }}
    */
-  satAuthenticate: (password, userId) =>
-    post('/api/sat/authenticate', { password, user_id: userId }),
+  satAuthenticate: async (password, userId) =>
+    post('/api/sat/authenticate', { password, user_id: userId }, await getSupabaseAuthHeader()),
 
   /**
    * Request a bulk download from SAT (SolicitaDescarga).
    * @param {object} params - { password, user_id, type, dateStart, dateEnd, requestType }
    * @returns {{ success, data: { requestId, statusCode, message } }}
    */
-  satQuery: (params) =>
-    post('/api/sat/query', params),
+  satQuery: async (params) =>
+    post('/api/sat/query', params, await getSupabaseAuthHeader()),
 
   /**
    * Verify the status of a SAT download request (VerificaSolicitudDescarga).
    * @param {object} params - { password, user_id, requestId }
    * @returns {{ success, data: { status, packageIds, cfdiCount } }}
    */
-  satVerify: (params) =>
-    post('/api/sat/verify', params),
+  satVerify: async (params) =>
+    post('/api/sat/verify', params, await getSupabaseAuthHeader()),
 
   /**
    * Download and process completed packages from SAT (DescargaMasiva).
@@ -274,6 +291,6 @@ export const satApi = {
    * @param {object} params - { password, user_id, packageIds, type }
    * @returns {{ success, data: { totalProcessed, totalErrors } }}
    */
-  satDownloadPackages: (params) =>
-    post('/api/sat/download-packages', params),
+  satDownloadPackages: async (params) =>
+    post('/api/sat/download-packages', params, await getSupabaseAuthHeader()),
 };

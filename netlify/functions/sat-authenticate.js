@@ -89,8 +89,14 @@ export const handler = async (event) => {
       throw new Error('Faltan credenciales de Supabase en el entorno del servidor.');
     }
 
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    // Reenviar el JWT del usuario para que Supabase abra el candado del RLS.
+    const authHeader = event.headers.authorization || event.headers.Authorization;
+    const supabase = createClient(supabaseUrl, supabaseKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
     const uid = user_id || '00000000-0000-0000-0000-000000000000';
+
+    console.log("UserID recibido:", user_id);
 
     const { data, error: dbError } = await supabase
       .from('configuracion_sat')
