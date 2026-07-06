@@ -1,15 +1,13 @@
 // ─── SAT Query (Solicita Descarga) ──────────────────────────────────────
 // Netlify Function: Requests a bulk download from the SAT.
-// Supports both emitidos and recibidos CFDI downloads.
+// Supports both emitidos ('issued') and recibidos ('received') CFDI downloads.
 //
-// Uses @nodecfdi/sat-ws-descarga-masiva v2 for the query call.
+// Misma estructura que sat-authenticate.js: reenvía el JWT del usuario para el
+// RLS, lee las credenciales de configuracion_sat e importa la librería SAT de
+// forma dinámica (evita el error ESM/CommonJS de Netlify).
 // ─────────────────────────────────────────────────────────────────────────
 
 import { createClient } from '@supabase/supabase-js';
-import {
-  Fiel, FielRequestBuilder, Service, HttpsWebClient, ServiceEndpoints,
-  QueryParameters, RequestType, DownloadType,
-} from '@nodecfdi/sat-ws-descarga-masiva';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -17,9 +15,15 @@ const CORS_HEADERS = {
   'Content-Type': 'application/json',
 };
 
-function buildSatService(cerBase64, keyBase64, password) {
-  const cerBinary = Buffer.from(cerBase64, 'base64').toString('binary');
-  const keyBinary = Buffer.from(keyBase64, 'base64').toString('binary');
+async function buildSatService(cerBase64, keyBase64, password) {
+  const { Fiel, FielRequestBuilder, Service, HttpsWebClient, ServiceEndpoints } =
+    await import('@nodecfdi/sat-ws-descarga-masiva');
+
+  const pureCer = cerBase64.includes(',') ? cerBase64.split(',')[1] : cerBase64;
+  const pureKey = keyBase64.includes(',') ? keyBase64.split(',')[1] : keyBase64;
+
+  const cerBinary = Buffer.from(pureCer, 'base64').toString('binary');
+  const keyBinary = Buffer.from(pureKey, 'base64').toString('binary');
 
   const fiel = Fiel.create(cerBinary, keyBinary, password);
   if (!fiel.isValid()) {
@@ -49,10 +53,9 @@ export const handler = async (event) => {
     const body = JSON.parse(event.body || '{}');
     const { password, user_id, type, dateStart, dateEnd, requestType = 'metadata' } = body;
 
-    // Validate required fields
     if (!password) {
       return {
-        statusCode: 200,
+        statusCode: 400,
         headers: CORS_HEADERS,
         body: JSON.stringify({ success: false, error: 'La contraseña de la e.firma es requerida.' }),
       };
@@ -60,7 +63,7 @@ export const handler = async (event) => {
 
     if (!type || !['emitidos', 'recibidos'].includes(type)) {
       return {
-        statusCode: 200,
+        statusCode: 400,
         headers: CORS_HEADERS,
         body: JSON.stringify({ success: false, error: 'type debe ser "emitidos" o "recibidos".' }),
       };
@@ -68,66 +71,78 @@ export const handler = async (event) => {
 
     if (!dateStart || !dateEnd) {
       return {
-        statusCode: 200,
+        statusCode: 400,
         headers: CORS_HEADERS,
         body: JSON.stringify({ success: false, error: 'Se requieren dateStart y dateEnd.' }),
       };
     }
 
-    // 1. Fetch credentials
-    const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_ANON_KEY;
+    // 1. Fetch credentials — reenviar el JWT del usuario para abrir el RLS.
+    const supabaseUrl = process.env.VITE_SUPABASE_URL;
+    const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
 
     if (!supabaseUrl || !supabaseKey) {
       throw new Error('Faltan credenciales de Supabase en el entorno.');
     }
 
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const authHeader = event.headers.authorization || event.headers.Authorization;
+    const supabase = createClient(supabaseUrl, supabaseKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
     const uid = user_id || '00000000-0000-0000-0000-000000000000';
 
-    const { data: config, error: dbError } = await supabase
+    console.log("UserID recibido:", user_id);
+
+    const { data, error: dbError } = await supabase
       .from('configuracion_sat')
       .select('cer_base64, key_base64')
       .eq('user_id', uid)
-      .maybeSingle();
+      .limit(1);
 
-    if (dbError || !config?.cer_base64 || !config?.key_base64) {
+    if (dbError || !data || data.length === 0 || !data[0].cer_base64 || !data[0].key_base64) {
       return {
-        statusCode: 200,
+        statusCode: 400,
         headers: CORS_HEADERS,
-        body: JSON.stringify({ success: false, error: 'Credenciales e.firma no encontradas.' }),
+        body: JSON.stringify({
+          success: false,
+          error: 'Error en BD o permisos RLS: ' + (dbError?.message || 'No data'),
+        }),
       };
     }
 
     // 2. Build service and authenticate
-    const service = buildSatService(config.cer_base64, config.key_base64, password);
-
-    // The library handles authentication internally when calling query()
-    // But we authenticate explicitly first to catch auth errors early
+    const service = await buildSatService(data[0].cer_base64, data[0].key_base64, password);
     await service.authenticate();
 
-    // 3. Build query parameters
-    const downloadType = requestType === 'xml' ? DownloadType.xml : DownloadType.metadata;
+    // 3. Build query parameters con la API real v2:
+    //    DownloadType = emitidos('issued') | recibidos('received')
+    //    RequestType  = metadata | xml
+    const { DateTimePeriod, DownloadType, RequestType, QueryParameters } =
+      await import('@nodecfdi/sat-ws-descarga-masiva');
 
-    const parameters = QueryParameters.create(
-      new Date(dateStart),
-      new Date(dateEnd),
-      downloadType,
-      RequestType.cfdi,
-    );
+    const period = DateTimePeriod.createFromValues(dateStart, dateEnd);
+    const downloadType = type === 'emitidos'
+      ? new DownloadType('issued')
+      : new DownloadType('received');
+    const reqType = requestType === 'xml'
+      ? new RequestType('xml')
+      : new RequestType('metadata');
+
+    const parameters = QueryParameters.create(period, downloadType, reqType);
 
     // 4. Execute the query (solicita descarga)
-    const result = await service.query(parameters);
+    const queryResult = await service.query(parameters);
 
     return {
       statusCode: 200,
       headers: CORS_HEADERS,
       body: JSON.stringify({
         success: true,
+        idSolicitud: queryResult.getRequestId(),
         data: {
-          requestId: result.getRequestId(),
-          statusCode: result.getStatusCode(),
-          message: result.getMessage(),
+          requestId: queryResult.getRequestId(),
+          statusCode: queryResult.getStatusCode(),
+          message: queryResult.getMessage(),
           type,
           dateRange: { start: dateStart, end: dateEnd },
           requestType,
@@ -137,7 +152,7 @@ export const handler = async (event) => {
   } catch (error) {
     console.error('[SAT Query Error]', error);
     return {
-      statusCode: 200,
+      statusCode: 400,
       headers: CORS_HEADERS,
       body: JSON.stringify({
         success: false,

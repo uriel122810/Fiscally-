@@ -561,13 +561,13 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
                                   const ds = document.getElementById('sat-sync-date-start')?.value;
                                   const de = document.getElementById('sat-sync-date-end')?.value;
                                   if (ds && de) {
-                                    import('../hooks/useSatData.js').then(m => {
-                                      // The hook approach is better — this is a quick trigger
-                                      import('../api/satClient.js').then(({ satApi: api }) => {
-                                        api.satQuery({ password: satPassword, user_id: session.user.id, type: 'emitidos', dateStart: ds, dateEnd: de })
-                                          .then(r => alert(r.success ? `Solicitud enviada al SAT. ID: ${r.data?.requestId}` : `Error: ${r.error}`))
-                                          .catch(e => alert(`Error: ${e.message}`));
-                                      });
+                                    import('../api/satClient.js').then(({ satApi: api }) => {
+                                      api.satQuery({ password: satPassword, user_id: session.user.id, type: 'emitidos', dateStart: ds, dateEnd: de })
+                                        .then(r => {
+                                          console.log('idSolicitud:', r.idSolicitud);
+                                          alert(r.success ? `Solicitud enviada al SAT. ID: ${r.idSolicitud}` : `Error: ${r.error}`);
+                                        })
+                                        .catch(e => alert(`Error: ${e.message}`));
                                     });
                                   }
                                 }}
@@ -583,7 +583,10 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
                                   if (ds && de) {
                                     import('../api/satClient.js').then(({ satApi: api }) => {
                                       api.satQuery({ password: satPassword, user_id: session.user.id, type: 'recibidos', dateStart: ds, dateEnd: de })
-                                        .then(r => alert(r.success ? `Solicitud enviada al SAT. ID: ${r.data?.requestId}` : `Error: ${r.error}`))
+                                        .then(r => {
+                                          console.log('idSolicitud:', r.idSolicitud);
+                                          alert(r.success ? `Solicitud enviada al SAT. ID: ${r.idSolicitud}` : `Error: ${r.error}`);
+                                        })
                                         .catch(e => alert(`Error: ${e.message}`));
                                     });
                                   }
