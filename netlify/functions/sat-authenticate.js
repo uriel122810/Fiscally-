@@ -50,7 +50,8 @@ async function buildSatService(cerBase64, keyBase64, password) {
   const requestBuilder = new FielRequestBuilder(fiel);
   const webClient = new HttpsWebClient();
   const endpoints = ServiceEndpoints.cfdi();
-  const service = new Service(requestBuilder, webClient, endpoints);
+  // OJO firma real: (requestBuilder, webClient, currentToken=null, endpoints).
+  const service = new Service(requestBuilder, webClient, null, endpoints);
 
   return { service, fiel };
 }

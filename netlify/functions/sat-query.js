@@ -33,7 +33,10 @@ async function buildSatService(cerBase64, keyBase64, password) {
   const requestBuilder = new FielRequestBuilder(fiel);
   const webClient = new HttpsWebClient();
   const endpoints = ServiceEndpoints.cfdi();
-  return new Service(requestBuilder, webClient, endpoints);
+  // OJO firma real: (requestBuilder, webClient, currentToken=null, endpoints).
+  // El 3er slot es el token; pasar endpoints ahí causa
+  // "this._currentToken.isValid is not a function" al hacer query().
+  return new Service(requestBuilder, webClient, null, endpoints);
 }
 
 export const handler = async (event) => {
