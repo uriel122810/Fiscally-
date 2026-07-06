@@ -135,6 +135,18 @@ export const handler = async (event) => {
 
     // 4. Execute the query (solicita descarga)
     const queryResult = await service.query(parameters);
+    const status = queryResult.getStatus();
+
+    if (!status.isAccepted()) {
+      return {
+        statusCode: 400,
+        headers: CORS_HEADERS,
+        body: JSON.stringify({
+          success: false,
+          error: `El SAT rechazó la solicitud: ${status.getCode()} - ${status.getMessage()}`,
+        }),
+      };
+    }
 
     return {
       statusCode: 200,
@@ -144,8 +156,8 @@ export const handler = async (event) => {
         idSolicitud: queryResult.getRequestId(),
         data: {
           requestId: queryResult.getRequestId(),
-          statusCode: queryResult.getStatusCode(),
-          message: queryResult.getMessage(),
+          statusCode: status.getCode(),
+          message: status.getMessage(),
           type,
           dateRange: { start: dateStart, end: dateEnd },
           requestType,
