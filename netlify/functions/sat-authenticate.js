@@ -25,27 +25,22 @@ const CORS_HEADERS = {
  * @param {string} password - Password to decrypt the .key file
  * @returns {{ service: Service, fiel: Fiel }}
  */
-const formatPEM = (base64, type) => {
-  const cleanBase64 = base64.replace(/^data:.*?;base64,/, '').replace(/\s/g, '');
-  const chunks = cleanBase64.match(/.{1,64}/g)?.join('\n') || cleanBase64;
-  if (type === 'cer') {
-    return `-----BEGIN CERTIFICATE-----\n${chunks}\n-----END CERTIFICATE-----`;
-  }
-  return `-----BEGIN ENCRYPTED PRIVATE KEY-----\n${chunks}\n-----END ENCRYPTED PRIVATE KEY-----`;
-};
-
 async function buildSatService(cerBase64, keyBase64, password) {
   // Importación dinámica para evitar el error ESM/CommonJS de Netlify
   // (require of ES Module not supported) con @nodecfdi/sat-ws-descarga-masiva.
   const { Fiel, FielRequestBuilder, Service, HttpsWebClient, ServiceEndpoints } =
     await import('@nodecfdi/sat-ws-descarga-masiva');
 
-  // Base64 (DER) → PEM (texto puro), evitando corrupción binaria en Node.
-  const cerPem = formatPEM(cerBase64, 'cer');
-  const keyPem = formatPEM(keyBase64, 'key');
+  // Limpiar prefijo data-URL si viene del frontend
+  const pureCer = cerBase64.includes(',') ? cerBase64.split(',')[1] : cerBase64;
+  const pureKey = keyBase64.includes(',') ? keyBase64.split(',')[1] : keyBase64;
 
-  // Create FIEL directly from PEM content (v2 API)
-  const fiel = Fiel.create(cerPem, keyPem, password);
+  // Decode Base64 → Buffer → binary string (latin1, as expected by Fiel.create)
+  const cerBinary = Buffer.from(pureCer, 'base64').toString('binary');
+  const keyBinary = Buffer.from(pureKey, 'base64').toString('binary');
+
+  // Create FIEL directly from binary content (v2 API)
+  const fiel = Fiel.create(cerBinary, keyBinary, password);
 
   if (!fiel.isValid()) {
     throw new Error('La e.firma (FIEL) no es válida, ha expirado, o es un CSD (no una FIEL).');
