@@ -53,18 +53,7 @@ export const handler = async (event) => {
       };
     }
 
-    const body = JSON.parse(event.body || '{}');
-    // Acepta idSolicitud (nuevo) o requestId (legacy) como identificador.
-    const { password, user_id } = body;
-    const idSolicitud = body.idSolicitud || body.requestId;
-
-    if (!password || !idSolicitud) {
-      return {
-        statusCode: 400,
-        headers: CORS_HEADERS,
-        body: JSON.stringify({ success: false, error: 'Se requieren password e idSolicitud.' }),
-      };
-    }
+    const { idSolicitud, password, user_id } = JSON.parse(event.body);
 
     // 1. Fetch credentials — reenviar el JWT del usuario para abrir el RLS.
     const supabaseUrl = process.env.VITE_SUPABASE_URL;
