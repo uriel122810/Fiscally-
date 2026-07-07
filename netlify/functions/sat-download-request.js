@@ -10,7 +10,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { createClient } from '@supabase/supabase-js';
-import { Fiel, FielRequestBuilder, Service, HttpsWebClient, ServiceEndpoints } from '@nodecfdi/sat-ws-descarga-masiva';
+import { Fiel, FielRequestBuilder, Service, HttpsWebClient, ServiceEndpoints, WebClientException, CResponse } from '@nodecfdi/sat-ws-descarga-masiva';
 
 export const handler = async (event) => {
   const headers = {
@@ -80,6 +80,23 @@ export const handler = async (event) => {
     // Authenticate with SAT
     const requestBuilder = new FielRequestBuilder(fiel);
     const webClient = new HttpsWebClient();
+
+    // FIX bug de la librería: en timeouts (HttpsWebClient sin _timeout) rechaza con
+    // un Error plano; ServiceConsumer luego llama webError.getResponse() y crashea
+    // con "webError.getResponse is not a function". Normalizamos cualquier rechazo
+    // que no sea WebClientException a uno válido, preservando el mensaje real.
+    const originalCall = webClient.call.bind(webClient);
+    webClient.call = async (request) => {
+      try {
+        return await originalCall(request);
+      } catch (error) {
+        if (typeof error?.getResponse === 'function') throw error;
+        const message = error?.message || 'Error de red al contactar al SAT';
+        // TIMEOUT_CODE hace que checkErrors() lance HttpTimeoutError con el mensaje.
+        throw new WebClientException(message, request, new CResponse(CResponse.TIMEOUT_CODE, message, {}));
+      }
+    };
+
     const endpoints = ServiceEndpoints.cfdi();
     // OJO firma real: (requestBuilder, webClient, currentToken=null, endpoints).
     const service = new Service(requestBuilder, webClient, null, endpoints);
