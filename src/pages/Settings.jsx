@@ -65,12 +65,12 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
   const [netlifyConfig, setNetlifyConfig] = useState({ loading: false, data: null, error: null });
 
   // SAT Connection States
-  const [satPassword, setSatPassword] = useState(() => sessionStorage.getItem('sat_password') || '');
+  const [satPassword, setSatPassword] = useState(() => localStorage.getItem('sat_password') || '');
   const [satConnecting, setSatConnecting] = useState(false);
   const [satConnectionResult, setSatConnectionResult] = useState(null);
 
   // SAT Verify (Ticket) States
-  const [requestId, setRequestId] = useState(() => sessionStorage.getItem('sat_request_id') || '');
+  const [requestId, setRequestId] = useState(() => localStorage.getItem('sat_request_id') || '');
   const [requestStatus, setRequestStatus] = useState('');
   const [loadingVerify, setLoadingVerify] = useState(false);
 
@@ -305,7 +305,7 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
   const handlePasswordChange = (e) => {
     const val = e.target.value;
     setSatPassword(val);
-    sessionStorage.setItem('sat_password', val);
+    localStorage.setItem('sat_password', val);
   };
 
   const fileToBase64 = (file) => new Promise((resolve, reject) => {
@@ -608,7 +608,7 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
                                           console.log('idSolicitud:', r.idSolicitud);
                                           if (r.success) {
                                             setRequestId(r.idSolicitud);
-                                            sessionStorage.setItem('sat_request_id', r.idSolicitud);
+                                            localStorage.setItem('sat_request_id', r.idSolicitud);
                                           }
                                           alert(r.success ? `Solicitud enviada al SAT. ID: ${r.idSolicitud}` : `Error: ${r.error}`);
                                         })
@@ -632,7 +632,7 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
                                           console.log('idSolicitud:', r.idSolicitud);
                                           if (r.success) {
                                             setRequestId(r.idSolicitud);
-                                            sessionStorage.setItem('sat_request_id', r.idSolicitud);
+                                            localStorage.setItem('sat_request_id', r.idSolicitud);
                                           }
                                           alert(r.success ? `Solicitud enviada al SAT. ID: ${r.idSolicitud}` : `Error: ${r.error}`);
                                         })
