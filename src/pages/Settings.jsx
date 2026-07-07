@@ -69,6 +69,11 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
   const [satConnecting, setSatConnecting] = useState(false);
   const [satConnectionResult, setSatConnectionResult] = useState(null);
 
+  // SAT Verify (Ticket) States
+  const [requestId, setRequestId] = useState(() => sessionStorage.getItem('sat_request_id') || '');
+  const [requestStatus, setRequestStatus] = useState('');
+  const [loadingVerify, setLoadingVerify] = useState(false);
+
   // e.firma Upload States
   const [cerFile, setCerFile] = useState(null);
   const [keyFile, setKeyFile] = useState(null);
@@ -264,6 +269,36 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
       const fallbackUrl = `https://api.dicebear.com/7.x/shapes/svg?seed=${session.user.id}`;
       if (onUpdateLogo) onUpdateLogo(fallbackUrl);
       alert('Fallo al guardar en la nube por permisos. Se ha aplicado un logo dinámico localmente.');
+    }
+  };
+
+  const handleVerifyStatus = async () => {
+    if (!requestId) return;
+    setLoadingVerify(true);
+    try {
+      const { supabase } = await import('../api/supabaseClient');
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch('/api/sat/verify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`
+        },
+        body: JSON.stringify({ idSolicitud: requestId, password: satPassword, user_id: session?.user?.id })
+      });
+      const result = await response.json();
+      if (result.success) {
+        setRequestStatus(`Estado: ${result.estado} (Código: ${result.estadoSolicitud})`);
+        if (result.estadoSolicitud === 3) {
+          console.log("Paquetes listos para descargar:", result.paquetes);
+        }
+      } else {
+        setRequestStatus(`Error: ${result.error}`);
+      }
+    } catch (err) {
+      setRequestStatus(`Error de red: ${err.message}`);
+    } finally {
+      setLoadingVerify(false);
     }
   };
 
@@ -571,6 +606,10 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
                                       api.satQuery({ password: satPassword, user_id: session.user.id, type: 'emitidos', dateStart: ds, dateEnd: de })
                                         .then(r => {
                                           console.log('idSolicitud:', r.idSolicitud);
+                                          if (r.success) {
+                                            setRequestId(r.idSolicitud);
+                                            sessionStorage.setItem('sat_request_id', r.idSolicitud);
+                                          }
                                           alert(r.success ? `Solicitud enviada al SAT. ID: ${r.idSolicitud}` : `Error: ${r.error}`);
                                         })
                                         .catch(e => alert(`Error: ${e.message}`));
@@ -591,6 +630,10 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
                                       api.satQuery({ password: satPassword, user_id: session.user.id, type: 'recibidos', dateStart: ds, dateEnd: de })
                                         .then(r => {
                                           console.log('idSolicitud:', r.idSolicitud);
+                                          if (r.success) {
+                                            setRequestId(r.idSolicitud);
+                                            sessionStorage.setItem('sat_request_id', r.idSolicitud);
+                                          }
                                           alert(r.success ? `Solicitud enviada al SAT. ID: ${r.idSolicitud}` : `Error: ${r.error}`);
                                         })
                                         .catch(e => alert(`Error: ${e.message}`));
@@ -601,6 +644,20 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
                                 📥 Descargar Recibidos
                               </button>
                             </div>
+
+                            {requestId && (
+                              <div className="mt-4 p-4 border rounded bg-gray-50">
+                                <p className="text-sm text-gray-600 break-all"><strong>Ticket activo:</strong> {requestId}</p>
+                                <button
+                                  onClick={handleVerifyStatus}
+                                  disabled={loadingVerify}
+                                  className="mt-2 px-4 py-2 bg-blue-600 text-white rounded text-sm disabled:opacity-50"
+                                >
+                                  {loadingVerify ? 'Verificando...' : 'Consultar estado en el SAT'}
+                                </button>
+                                {requestStatus && <p className="mt-2 text-sm font-medium">{requestStatus}</p>}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
