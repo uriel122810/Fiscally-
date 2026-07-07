@@ -293,10 +293,18 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
           console.log("Paquetes listos para descargar:", result.paquetes);
         }
       } else {
-        setRequestStatus(`Error: ${result.error}`);
+        if ((result.error || '').toLowerCase().includes('timeout')) {
+          setRequestStatus('⏳ Esperando a que el SAT conteste. Sus servidores están lentos, intenta verificar de nuevo en unos minutos.');
+        } else {
+          setRequestStatus(`Error del SAT: ${result.error}`);
+        }
       }
     } catch (err) {
-      setRequestStatus(`Error de red: ${err.message}`);
+      if (err.message.toLowerCase().includes('timeout') || err.message.toLowerCase().includes('failed to fetch')) {
+        setRequestStatus('⏳ Esperando a que el SAT conteste. La conexión está lenta, intenta de nuevo.');
+      } else {
+        setRequestStatus(`Error de red: ${err.message}`);
+      }
     } finally {
       setLoadingVerify(false);
     }
