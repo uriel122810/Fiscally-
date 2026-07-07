@@ -121,13 +121,13 @@ export const handler = async (event) => {
       }),
     };
   } catch (error) {
-    console.error('[SAT Verify Error]', error);
+    console.error("Error completo en verify:", error);
     return {
       statusCode: 400,
       headers: CORS_HEADERS,
       body: JSON.stringify({
         success: false,
-        error: error.message || 'Error al verificar la solicitud.',
+        error: error.message || "Error desconocido al contactar al SAT",
       }),
     };
   }
