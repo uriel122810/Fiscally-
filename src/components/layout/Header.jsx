@@ -200,6 +200,7 @@ export default function Header({ activePage, userEmail }) {
                   style={{ width: '100%', justifyContent: 'flex-start', color: 'var(--danger-text)' }}
                   onClick={async () => {
                     setShowUserMenu(false);
+                    sessionStorage.removeItem('sat_password');
                     if (supabase) {
                       await supabase.auth.signOut();
                     }

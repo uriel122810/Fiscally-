@@ -65,7 +65,7 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
   const [netlifyConfig, setNetlifyConfig] = useState({ loading: false, data: null, error: null });
 
   // SAT Connection States
-  const [satPassword, setSatPassword] = useState('');
+  const [satPassword, setSatPassword] = useState(() => sessionStorage.getItem('sat_password') || '');
   const [satConnecting, setSatConnecting] = useState(false);
   const [satConnectionResult, setSatConnectionResult] = useState(null);
 
@@ -265,6 +265,12 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
       if (onUpdateLogo) onUpdateLogo(fallbackUrl);
       alert('Fallo al guardar en la nube por permisos. Se ha aplicado un logo dinámico localmente.');
     }
+  };
+
+  const handlePasswordChange = (e) => {
+    const val = e.target.value;
+    setSatPassword(val);
+    sessionStorage.setItem('sat_password', val);
   };
 
   const fileToBase64 = (file) => new Promise((resolve, reject) => {
@@ -488,7 +494,7 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
                               className="search-input"
                               placeholder="••••••••"
                               value={satPassword}
-                              onChange={(e) => setSatPassword(e.target.value)}
+                              onChange={handlePasswordChange}
                               style={{ width: '100%', paddingLeft: 'var(--sp-3)' }}
                             />
                           </div>
