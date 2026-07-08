@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import { FileArchive, Upload, Loader2, CheckCircle, AlertCircle, X } from 'lucide-react';
+import { FileArchive, Upload, Loader2, CheckCircle, AlertCircle, AlertTriangle, X } from 'lucide-react';
 import { formatCurrency } from '../data/mockData';
+import { supabase } from '../api/supabaseClient';
 
 const TIPO_BADGES = {
   I: { cls: 'badge-cobrada', label: 'Ingreso' },
@@ -10,6 +11,11 @@ const TIPO_BADGES = {
   T: { cls: 'badge-pendiente', label: 'Traslado' },
 };
 
+const SEVERIDAD_BADGES = {
+  critica: { cls: 'badge-cancelada', label: 'Crítica' },
+  alta: { cls: 'badge-pagar', label: 'Alta' },
+};
+
 function TipoBadge({ tipo }) {
   const info = TIPO_BADGES[tipo] || { cls: 'badge-pendiente', label: tipo };
   return <span className={`badge ${info.cls}`}><span className="badge-dot" /> {info.label}</span>;
@@ -17,19 +23,33 @@ function TipoBadge({ tipo }) {
 
 const MAX_ERRORS_VISIBLE = 50;
 const PREVIEW_ROWS = 8;
+// Tolerancia para diferencias de redondeo de punto flotante al comparar
+// total facturado vs. neto pagado calculado (no es un umbral de negocio).
+const TOLERANCIA_DISCREPANCIA = 0.01;
 
 export default function BulkImport() {
-  const [status, setStatus] = useState('idle'); // idle | starting | processing | done | error
+  const [status, setStatus] = useState('idle'); // idle | starting | processing | saving | done | error
   const [fileName, setFileName] = useState('');
   const [totalXml, setTotalXml] = useState(0);
   const [processed, setProcessed] = useState(0);
   const [invoices, setInvoices] = useState([]);
+  const [saved, setSaved] = useState(0);
+  const [anomalias, setAnomalias] = useState([]);
+  const [dbErrors, setDbErrors] = useState([]);
   const [summary, setSummary] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
   const workerRef = useRef(null);
   const inputRef = useRef(null);
+  const userIdRef = useRef(null);
+  // Contador de generación: al cancelar se incrementa y los lotes en vuelo de
+  // la corrida vieja se resuelven sin tocar el estado.
+  const runIdRef = useRef(0);
+  // Cola serializada: el worker produce lotes más rápido de lo que la red
+  // inserta; el encadenamiento garantiza un upsert a la vez y en orden.
+  const saveChainRef = useRef(Promise.resolve());
+  const batchCountRef = useRef(0);
 
-  const running = status === 'starting' || status === 'processing';
+  const running = status === 'starting' || status === 'processing' || status === 'saving';
   const pct = totalXml ? Math.min(100, Math.round((processed / totalXml) * 100)) : 0;
 
   useEffect(() => () => workerRef.current?.terminate(), []);
@@ -39,51 +59,136 @@ export default function BulkImport() {
     workerRef.current = null;
   };
 
-  const handleWorkerMessage = (e) => {
-    const data = e.data;
-    switch (data.type) {
-      case 'meta':
-        setTotalXml(data.totalXml);
-        setStatus('processing');
-        break;
-      case 'progress':
-        setProcessed(data.processed);
-        break;
-      case 'batch': {
-        setProcessed(data.processed);
-        setInvoices(prev => [...prev, ...data.invoices]);
-        // AQUÍ LLAMAREMOS A SUPABASE
-        // (futuro) upsert de data.invoices (lote de hasta 25 filas) a la tabla
-        // `facturas` con { onConflict: 'uuid_cfdi' }, como en sat-download.js.
-        break;
+  const procesarLoteEnSupabase = async (lote, runId) => {
+    const userId = userIdRef.current;
+
+    // 1. Mapear el lote del worker a las columnas de la tabla `facturas`
+    const rows = lote.map(inv => ({
+      user_id: userId,
+      uuid_fiscal: inv.uuid,
+      rfc_emisor: inv.rfcEmisor,
+      rfc_receptor: inv.rfcReceptor,
+      total: inv.total,
+      tipo_cfdi: inv.tipoComprobante,
+      fecha_emision: inv.fecha,
+      estado_revision: 'pendiente',
+    }));
+
+    // 2. Upsert masivo del lote + .select() para obtener los ids generados
+    const { data: insertadas, error } = await supabase
+      .from('facturas')
+      .upsert(rows, { onConflict: 'uuid_fiscal' })
+      .select();
+    if (error) throw new Error(`Upsert facturas: ${error.message}`);
+
+    // 3-4. Motor de Auditoría: para nómina, el total facturado debe coincidir
+    // con el neto pagado que calculó el worker. No importa la magnitud de la
+    // diferencia — cualquier descuadre es la anomalía.
+    const porUuid = new Map(lote.map(inv => [inv.uuid, inv]));
+    const inconsistencias = [];
+    for (const factura of insertadas) {
+      const original = porUuid.get(factura.uuid_fiscal);
+      if (!original || factura.tipo_cfdi !== 'N' || !original.nomina) continue;
+      const netoPagado = original.nomina.netoPagado;
+      if (Math.abs(factura.total - netoPagado) > TOLERANCIA_DISCREPANCIA) {
+        inconsistencias.push({
+          factura_id: factura.id,
+          tipo_anomalia: 'discrepancia_nomina',
+          severidad: 'alta',
+          descripcion_analisis: `Discrepancia detectada: el total facturado (${formatCurrency(factura.total)}) no coincide con el neto pagado calculado (${formatCurrency(netoPagado)}).`,
+        });
       }
-      case 'done':
-        setSummary(data.summary);
-        setProcessed(data.summary.totalXml);
-        setStatus('done');
-        stopWorker();
-        break;
-      case 'error':
-        setErrorMsg(data.message);
-        setStatus('error');
-        stopWorker();
-        break;
+    }
+
+    // 5. Guardar las inconsistencias del lote; upsert cruzando factura_id +
+    // tipo_anomalia evita duplicar la misma alerta si se re-sube el mismo ZIP.
+    if (inconsistencias.length) {
+      const { error: errInc } = await supabase
+        .from('inconsistencias_facturas')
+        .upsert(inconsistencias, { onConflict: 'factura_id,tipo_anomalia' });
+      if (errInc) throw new Error(`Guardar inconsistencias: ${errInc.message}`);
+    }
+
+    if (runIdRef.current === runId) {
+      setSaved(prev => prev + insertadas.length);
+      if (inconsistencias.length) setAnomalias(prev => [...prev, ...inconsistencias]);
     }
   };
 
-  const startProcessing = (file) => {
+  const startProcessing = async (file) => {
+    if (!supabase) {
+      setStatus('error');
+      setErrorMsg('Supabase no está configurado (faltan variables de entorno).');
+      return;
+    }
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user?.id;
+    if (!userId) {
+      setStatus('error');
+      setErrorMsg('No hay sesión activa; vuelve a iniciar sesión para guardar las facturas.');
+      return;
+    }
+
     stopWorker();
+    userIdRef.current = userId;
+    const runId = ++runIdRef.current;
+    saveChainRef.current = Promise.resolve();
+    batchCountRef.current = 0;
     setStatus('starting');
     setFileName(file.name);
     setTotalXml(0);
     setProcessed(0);
     setInvoices([]);
+    setSaved(0);
+    setAnomalias([]);
+    setDbErrors([]);
     setSummary(null);
     setErrorMsg('');
 
     const worker = new Worker(new URL('../workers/cfdiZip.worker.js', import.meta.url), { type: 'module' });
     workerRef.current = worker;
-    worker.onmessage = handleWorkerMessage;
+    worker.onmessage = (e) => {
+      const data = e.data;
+      switch (data.type) {
+        case 'meta':
+          setTotalXml(data.totalXml);
+          setStatus('processing');
+          break;
+        case 'progress':
+          setProcessed(data.processed);
+          break;
+        case 'batch': {
+          setProcessed(data.processed);
+          setInvoices(prev => [...prev, ...data.invoices]);
+          const lote = data.invoices;
+          const numLote = ++batchCountRef.current;
+          saveChainRef.current = saveChainRef.current
+            .then(() => procesarLoteEnSupabase(lote, runId))
+            .catch(err => {
+              // Un lote fallido no aborta la corrida; se registra y se sigue
+              if (runIdRef.current === runId) {
+                setDbErrors(prev => [...prev, { lote: numLote, message: err.message }]);
+              }
+            });
+          break;
+        }
+        case 'done':
+          setSummary(data.summary);
+          setProcessed(data.summary.totalXml);
+          stopWorker();
+          // El parseo terminó pero puede haber lotes pendientes en la cola
+          setStatus('saving');
+          saveChainRef.current.then(() => {
+            if (runIdRef.current === runId) setStatus('done');
+          });
+          break;
+        case 'error':
+          setErrorMsg(data.message);
+          setStatus('error');
+          stopWorker();
+          break;
+      }
+    };
     worker.onerror = (err) => {
       setErrorMsg(err.message || 'Error inesperado en el worker');
       setStatus('error');
@@ -102,12 +207,18 @@ export default function BulkImport() {
   };
 
   const handleCancel = () => {
+    runIdRef.current++;
     stopWorker();
+    saveChainRef.current = Promise.resolve();
+    batchCountRef.current = 0;
     setStatus('idle');
     setFileName('');
     setTotalXml(0);
     setProcessed(0);
     setInvoices([]);
+    setSaved(0);
+    setAnomalias([]);
+    setDbErrors([]);
     setSummary(null);
     setErrorMsg('');
   };
@@ -154,7 +265,8 @@ export default function BulkImport() {
             <h3>Sube un ZIP con tus facturas XML</h3>
             <p style={{ maxWidth: 460, margin: '0 auto' }}>
               La descompresión y lectura corren en un Web Worker: la interfaz no se
-              congela aunque el archivo contenga miles de CFDI.
+              congela aunque el archivo contenga miles de CFDI. Cada lote de 25 se
+              guarda en Supabase y pasa por el motor de auditoría.
             </p>
             <button className="btn btn-primary" style={{ marginTop: 'var(--sp-5)' }} onClick={() => inputRef.current?.click()}>
               <Upload size={15} /> Seleccionar archivo
@@ -177,8 +289,9 @@ export default function BulkImport() {
               </div>
               <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 2 }}>
                 {status === 'starting' && 'Leyendo directorio del ZIP...'}
-                {status === 'processing' && `Extrayendo datos fiscales — lotes de 25 facturas`}
-                {status === 'done' && `Completado en ${(summary.durationMs / 1000).toFixed(1)} s`}
+                {status === 'processing' && `Extrayendo y guardando en lotes de 25 — ${saved.toLocaleString('es-MX')} guardadas`}
+                {status === 'saving' && `Guardando lotes restantes en Supabase... ${saved.toLocaleString('es-MX')} guardadas`}
+                {status === 'done' && `Completado en ${(summary.durationMs / 1000).toFixed(1)} s — ${saved.toLocaleString('es-MX')} facturas guardadas en Supabase`}
               </div>
             </div>
             <div className="mono" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)', flexShrink: 0 }}>
@@ -208,10 +321,11 @@ export default function BulkImport() {
         <div style={{ display: 'flex', gap: 'var(--sp-5)', marginBottom: 'var(--sp-6)', flexWrap: 'wrap' }}>
           {[
             { label: 'XML procesados', value: summary.totalXml.toLocaleString('es-MX'), icon: '📦', color: '#6366F1' },
-            { label: 'Facturas extraídas', value: summary.parsed.toLocaleString('es-MX'), icon: '✅', color: '#10B981' },
+            { label: 'Guardadas en Supabase', value: saved.toLocaleString('es-MX'), icon: '✅', color: '#10B981' },
             { label: 'Monto total', value: formatCurrency(totalImportado), icon: '💰', color: '#0EA5E9', isCurrency: true },
+            { label: 'Anomalías detectadas', value: anomalias.length.toLocaleString('es-MX'), icon: '🚨', color: '#DC2626' },
             { label: 'Omitidos / duplicados', value: `${summary.skippedNonCfdi.toLocaleString('es-MX')} / ${summary.duplicates.toLocaleString('es-MX')}`, icon: '⏭️', color: '#F59E0B' },
-            { label: 'Errores', value: summary.errors.length.toLocaleString('es-MX'), icon: '⚠️', color: '#EF4444' },
+            { label: 'Errores', value: (summary.errors.length + dbErrors.length).toLocaleString('es-MX'), icon: '⚠️', color: '#EF4444' },
           ].map((stat, i) => (
             <div key={i} className="card card-pad" style={{ flex: 1, minWidth: 170 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
@@ -227,6 +341,51 @@ export default function BulkImport() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {status === 'done' && anomalias.length > 0 && (
+        <div className="card card-pad" style={{ marginBottom: 'var(--sp-6)' }}>
+          <div className="section-label" style={{ marginBottom: 'var(--sp-3)', display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+            <AlertTriangle size={14} style={{ color: 'var(--warning-text)' }} />
+            Motor de Auditoría — {anomalias.length.toLocaleString('es-MX')} inconsistencias
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', maxHeight: 320, overflowY: 'auto' }}>
+            {anomalias.slice(0, MAX_ERRORS_VISIBLE).map((anom, i) => {
+              const sev = SEVERIDAD_BADGES[anom.severidad] || { cls: 'badge-pendiente', label: anom.severidad };
+              return (
+                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--sp-3)' }}>
+                  <span className={`badge ${sev.cls}`} style={{ flexShrink: 0 }}><span className="badge-dot" /> {sev.label}</span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-primary)' }}>{anom.descripcion_analisis}</div>
+                    <div className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 2 }}>
+                      {anom.tipo_anomalia} · factura_id: {anom.factura_id}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {anomalias.length > MAX_ERRORS_VISIBLE && (
+              <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
+                ... y {(anomalias.length - MAX_ERRORS_VISIBLE).toLocaleString('es-MX')} más
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {dbErrors.length > 0 && (
+        <div className="card card-pad" style={{ marginBottom: 'var(--sp-6)' }}>
+          <div className="section-label" style={{ marginBottom: 'var(--sp-3)' }}>
+            Errores al guardar en Supabase ({dbErrors.length.toLocaleString('es-MX')} lotes)
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', maxHeight: 260, overflowY: 'auto' }}>
+            {dbErrors.slice(0, MAX_ERRORS_VISIBLE).map((err, i) => (
+              <div key={i} className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--danger-text)' }}>
+                Lote {err.lote} — {err.message}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

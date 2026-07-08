@@ -156,21 +156,22 @@ export const handler = async (event) => {
               const { error: insertError } = await supabase
                 .from('facturas')
                 .upsert({
-                  uuid_cfdi: parsed.uuid,
+                  uuid_fiscal: parsed.uuid,
                   user_id: uid,
                   rfc_emisor: parsed.rfc_emisor,
                   rfc_receptor: parsed.rfc_receptor,
                   nombre_emisor: parsed.nombre_emisor,
                   nombre_receptor: parsed.nombre_receptor,
-                  fecha: parsed.fecha_emision,
+                  fecha_emision: parsed.fecha_emision,
                   fecha_timbrado: parsed.fecha_certificacion,
                   total: parsed.monto,
                   direction,
                   sat_status: parsed.estatus?.toLowerCase() === 'cancelado' ? 'cancelada' : 'vigente',
-                  tipo_comprobante: parsed.efecto || 'I',
+                  tipo_cfdi: parsed.efecto || 'I',
+                  estado_revision: 'pendiente',
                   source: 'sat_descarga',
                   updated_at: new Date().toISOString(),
-                }, { onConflict: 'uuid_cfdi' });
+                }, { onConflict: 'uuid_fiscal' });
 
               if (insertError) {
                 console.error(`Error inserting ${parsed.uuid}:`, insertError.message);
@@ -215,7 +216,8 @@ export const handler = async (event) => {
                 const rfcReceptor = xmlContent.match(/cfdi:Receptor[^>]*Rfc="([^"]+)"/)?.[1] || '';
                 const nombreEmisor = xmlContent.match(/cfdi:Emisor[^>]*Nombre="([^"]+)"/)?.[1] || '';
                 const nombreReceptor = xmlContent.match(/cfdi:Receptor[^>]*Nombre="([^"]+)"/)?.[1] || '';
-                const total = parseFloat(xmlContent.match(/Total="([^"]+)"/)?.[1] || '0');
+                // \s inicial obligatorio: sin él, Total matchea dentro de SubTotal
+                const total = parseFloat(xmlContent.match(/\sTotal="([^"]+)"/)?.[1] || '0');
                 const subtotal = parseFloat(xmlContent.match(/SubTotal="([^"]+)"/)?.[1] || '0');
                 const fecha = xmlContent.match(/Fecha="([^"]+)"/)?.[1] || '';
                 const tipoComprobante = xmlContent.match(/TipoDeComprobante="([^"]+)"/)?.[1] || 'I';
@@ -228,18 +230,19 @@ export const handler = async (event) => {
                 const { error: insertError } = await supabase
                   .from('facturas')
                   .upsert({
-                    uuid_cfdi: uuid,
+                    uuid_fiscal: uuid,
                     user_id: uid,
                     rfc_emisor: rfcEmisor,
                     rfc_receptor: rfcReceptor,
                     nombre_emisor: nombreEmisor,
                     nombre_receptor: nombreReceptor,
-                    fecha,
+                    fecha_emision: fecha,
                     total,
                     subtotal,
                     direction,
                     sat_status: 'vigente',
-                    tipo_comprobante: tipoComprobante,
+                    tipo_cfdi: tipoComprobante,
+                    estado_revision: 'pendiente',
                     moneda,
                     serie,
                     folio,
@@ -248,7 +251,7 @@ export const handler = async (event) => {
                     xml_content: xmlContent,
                     source: 'sat_descarga',
                     updated_at: new Date().toISOString(),
-                  }, { onConflict: 'uuid_cfdi' });
+                  }, { onConflict: 'uuid_fiscal' });
 
                 if (insertError) {
                   console.error(`Error inserting ${uuid}:`, insertError.message);
