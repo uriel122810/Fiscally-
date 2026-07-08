@@ -2,10 +2,10 @@ import { useState, useMemo } from 'react';
 import {
   Search, Filter, Download, Plus, ChevronUp, ChevronDown,
   Eye, FileDown, MoreHorizontal, CheckSquare, X,
-  Shield, ShieldOff, FileText, FileX, Loader2, WifiOff, Wifi
+  Shield, ShieldOff, FileText, FileX, Loader2, WifiOff, Wifi, AlertTriangle
 } from 'lucide-react';
 import { formatCurrency, formatDate } from '../data/mockData';
-import { useInvoices } from '../hooks/useSatData';
+import { useInvoices, useInconsistencias } from '../hooks/useSatData';
 import { satApi } from '../api/satClient';
 import InvoiceDrawer from './InvoiceDrawer';
 
@@ -80,6 +80,9 @@ export default function Invoices() {
     status: statusFilter !== 'all' ? statusFilter : undefined,
     search: search.trim() || undefined,
   });
+  const { inconsistencias } = useInconsistencias();
+  const flaggedIds = useMemo(() => new Set(inconsistencias.map(i => i.factura_id)), [inconsistencias]);
+  const flaggedDesc = useMemo(() => new Map(inconsistencias.map(i => [i.factura_id, i.descripcion_analisis])), [inconsistencias]);
 
   // ── Client-side sorting (since the API returns sorted by date) ────
   const filtered = useMemo(() => {
@@ -300,8 +303,13 @@ export default function Invoices() {
                     />
                   </td>
                   <td>
-                    <div style={{ fontWeight: 500, fontSize: 'var(--text-sm)', lineHeight: 1.3 }}>
-                      {inv.razon_social}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div style={{ fontWeight: 500, fontSize: 'var(--text-sm)', lineHeight: 1.3 }}>
+                        {inv.razon_social}
+                      </div>
+                      {flaggedIds.has(inv.id) && (
+                        <AlertTriangle size={13} style={{ color: 'var(--warning-text)', flexShrink: 0 }} title={flaggedDesc.get(inv.id)} />
+                      )}
                     </div>
                     <div className="td-mono" style={{ marginTop: 2 }}>{inv.rfc}</div>
                   </td>

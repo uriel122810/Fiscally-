@@ -6,16 +6,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { satApi } from '../api/satClient.js';
-import {
-  invoices as mockInvoices,
-  kpiData as mockKpiData,
-  monthlyData as mockMonthlyData,
-  rubroDistribution as mockRubroDistribution,
-  taxDeclarations as mockTaxDeclarations,
-  retenciones as mockRetenciones,
-  formatCurrency,
-  formatDate,
-} from '../data/mockData.js';
+import { supabase } from '../api/supabaseClient.js';
+import { mapFacturaRow } from '../utils/facturaMapper.js';
 
 /**
  * Track whether the backend is available.
@@ -51,10 +43,9 @@ export function resetBackendCheck() {
 
 // ─── useInvoices ────────────────────────────────────────────────────────
 /**
- * Fetch invoices from the backend API with filters.
- * Falls back to mock data if the backend is unavailable.
+ * Lee facturas reales del usuario autenticado directamente de Supabase.
  *
- * @param {object} filters - { direction, year, month, rfc, search, status, limit, offset }
+ * @param {object} filters - { direction, search, status, limit }
  * @returns {{ invoices: Array, loading: boolean, error: string|null, total: number, refetch: Function, isLive: boolean }}
  */
 export function useInvoices(filters = {}) {
@@ -71,31 +62,45 @@ export function useInvoices(filters = {}) {
     setError(null);
 
     try {
-      const backendUp = await checkBackend();
+      if (!supabase) throw new Error('Supabase no está configurado.');
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id;
+      if (!userId) throw new Error('No hay sesión activa.');
 
-      if (backendUp) {
-        const response = await satApi.getCfdis(filtersRef.current);
+      let query = supabase
+        .from('facturas')
+        .select('*')
+        .eq('user_id', userId)
+        .order('fecha_emision', { ascending: false })
+        .limit(filtersRef.current.limit || 500);
 
-        if (response.success && response.data?.invoices?.length > 0) {
-          setInvoices(response.data.invoices);
-          setTotal(response.data.total);
-          setIsLive(true);
-        } else {
-          // Backend is up but no data — show mock data as placeholder
-          setInvoices(applyMockFilters(mockInvoices, filtersRef.current));
-          setTotal(mockInvoices.length);
-          setIsLive(false);
+      const { direction, search } = filtersRef.current;
+      if (direction) query = query.eq('direction', direction);
+      if (search) {
+        const q = search.trim().replace(/[%,()]/g, '');
+        if (q) {
+          query = query.or(
+            `rfc_emisor.ilike.%${q}%,rfc_receptor.ilike.%${q}%,nombre_emisor.ilike.%${q}%,nombre_receptor.ilike.%${q}%,folio.ilike.%${q}%`
+          );
         }
-      } else {
-        // Backend not available — use mock data
-        setInvoices(applyMockFilters(mockInvoices, filtersRef.current));
-        setTotal(mockInvoices.length);
-        setIsLive(false);
       }
+
+      const { data, error: qErr } = await query;
+      if (qErr) throw qErr;
+
+      let mapped = (data || []).map(mapFacturaRow);
+      // status es un campo derivado (no columna de BD) — se filtra en cliente
+      if (filtersRef.current.status) {
+        mapped = mapped.filter(inv => inv.status === filtersRef.current.status);
+      }
+
+      setInvoices(mapped);
+      setTotal(mapped.length);
+      setIsLive(true);
     } catch (err) {
-      console.warn('useInvoices: falling back to mock data', err.message);
-      setInvoices(applyMockFilters(mockInvoices, filtersRef.current));
-      setTotal(mockInvoices.length);
+      console.error('useInvoices:', err.message);
+      setInvoices([]);
+      setTotal(0);
       setIsLive(false);
       setError(err.message);
     } finally {
@@ -105,47 +110,14 @@ export function useInvoices(filters = {}) {
 
   useEffect(() => {
     fetchData();
-  }, [
-    fetchData,
-    filters.direction,
-    filters.year,
-    filters.month,
-    filters.status,
-    filters.search,
-  ]);
+  }, [fetchData, filters.direction, filters.status, filters.search]);
 
   return { invoices, loading, error, total, refetch: fetchData, isLive };
 }
 
-/**
- * Apply filters to mock data (client-side fallback).
- */
-function applyMockFilters(data, filters) {
-  let list = [...data];
-
-  if (filters.direction && filters.direction !== 'all') {
-    list = list.filter(i => i.direction === filters.direction);
-  }
-
-  if (filters.status && filters.status !== 'all') {
-    list = list.filter(i => i.status === filters.status);
-  }
-
-  if (filters.search) {
-    const q = filters.search.toLowerCase();
-    list = list.filter(i =>
-      i.razon_social?.toLowerCase().includes(q) ||
-      i.rfc?.toLowerCase().includes(q) ||
-      i.folio?.toLowerCase().includes(q)
-    );
-  }
-
-  return list;
-}
-
 // ─── useInvoiceDetail ───────────────────────────────────────────────────
 /**
- * Fetch a single CFDI detail by UUID.
+ * Lee el detalle de una factura por UUID fiscal o por id de fila.
  */
 export function useInvoiceDetail(uuid) {
   const [detail, setDetail] = useState(null);
@@ -160,21 +132,21 @@ export function useInvoiceDetail(uuid) {
 
     (async () => {
       try {
-        const backendUp = await checkBackend();
-        if (backendUp) {
-          const response = await satApi.getCfdiDetail(uuid);
-          if (response.success) {
-            setDetail(response.data);
-            return;
-          }
-        }
-        // Fallback: find in mock data
-        const mock = mockInvoices.find(i => i.uuid_cfdi === uuid || i.id === uuid);
-        setDetail(mock ? { invoice: mock, hasXml: false } : null);
+        if (!supabase) throw new Error('Supabase no está configurado.');
+        const { data: { session } } = await supabase.auth.getSession();
+        const userId = session?.user?.id;
+        if (!userId) throw new Error('No hay sesión activa.');
+
+        const looksLikeUuidFiscal = /^[0-9a-fA-F-]{30,36}$/.test(uuid);
+        let query = supabase.from('facturas').select('*').eq('user_id', userId);
+        query = looksLikeUuidFiscal ? query.eq('uuid_fiscal', uuid) : query.eq('id', uuid);
+
+        const { data, error: qErr } = await query.maybeSingle();
+        if (qErr) throw qErr;
+        setDetail(data ? { invoice: mapFacturaRow(data), hasXml: !!data.xml_content } : null);
       } catch (err) {
         setError(err.message);
-        const mock = mockInvoices.find(i => i.uuid_cfdi === uuid || i.id === uuid);
-        setDetail(mock ? { invoice: mock, hasXml: false } : null);
+        setDetail(null);
       } finally {
         setLoading(false);
       }
@@ -185,61 +157,102 @@ export function useInvoiceDetail(uuid) {
 }
 
 // ─── useKpiData ─────────────────────────────────────────────────────────
+const MES_LABELS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
 /**
- * Fetch KPI data, monthly chart data, and rubro distribution.
+ * Agrega KPIs y datos mensuales de los últimos 6 meses a partir de
+ * `facturas`. No hay columnas de rubro/ISR/IVA en el esquema actual, así
+ * que rubroDistribution/taxData se devuelven vacíos (honesto, no simulado).
  */
 export function useKpiData(year, month) {
-  const [data, setData] = useState({
-    kpis: mockKpiData,
-    monthlyData: mockMonthlyData,
-    rubroDistribution: mockRubroDistribution,
-    taxData: mockTaxDeclarations,
+  const [state, setState] = useState({
+    kpis: { ingresos: 0, gastos: 0, balance: 0, ingresosDelta: 0, gastosDelta: 0, balanceDelta: 0, facturasPorCobrar: 0, facturasPorPagar: 0 },
+    monthlyData: [],
+    rubroDistribution: [],
+    taxData: [],
   });
   const [loading, setLoading] = useState(true);
   const [isLive, setIsLive] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
 
     (async () => {
       try {
-        const backendUp = await checkBackend();
-        if (backendUp) {
-          const response = await satApi.getStats({ year, month });
-          if (response.success && response.data) {
-            const { kpis, monthlyData: md, rubroDistribution: rd, taxData: td } = response.data;
+        if (!supabase) throw new Error('Supabase no está configurado.');
+        const { data: { session } } = await supabase.auth.getSession();
+        const userId = session?.user?.id;
+        if (!userId) throw new Error('No hay sesión activa.');
 
-            // Only use live data if there are actual invoices
-            if (kpis.totalFacturas > 0) {
-              setData({
-                kpis,
-                monthlyData: md,
-                rubroDistribution: rd.length > 0 ? rd : mockRubroDistribution,
-                taxData: td,
-              });
-              setIsLive(true);
-              setLoading(false);
-              return;
-            }
-          }
+        const targetY = year ?? new Date().getFullYear();
+        const targetM = month ?? (new Date().getMonth() + 1);
+        const endDate = new Date(targetY, targetM, 1);      // límite superior exclusivo
+        const startDate = new Date(targetY, targetM - 6, 1); // 6 meses atrás, inclusivo
+
+        const { data, error: qErr } = await supabase
+          .from('facturas')
+          .select('total, direction, fecha_emision, sat_status')
+          .eq('user_id', userId)
+          .neq('sat_status', 'cancelada')
+          .gte('fecha_emision', startDate.toISOString())
+          .lt('fecha_emision', endDate.toISOString());
+        if (qErr) throw qErr;
+
+        const buckets = [];
+        for (let i = 5; i >= 0; i--) {
+          const d = new Date(targetY, targetM - 1 - i, 1);
+          buckets.push({ y: d.getFullYear(), m: d.getMonth() + 1, mes: MES_LABELS[d.getMonth()], ingresos: 0, gastos: 0 });
+        }
+        const idxOf = new Map(buckets.map((b, i) => [`${b.y}-${b.m}`, i]));
+
+        for (const row of data || []) {
+          if (!row.fecha_emision) continue;
+          const d = new Date(row.fecha_emision);
+          const i = idxOf.get(`${d.getFullYear()}-${d.getMonth() + 1}`);
+          if (i === undefined) continue;
+          if (row.direction === 'emitida') buckets[i].ingresos += Number(row.total) || 0;
+          else if (row.direction === 'recibida') buckets[i].gastos += Number(row.total) || 0;
+        }
+
+        const current = buckets[5], previous = buckets[4];
+        const pctDelta = (curr, prev) => prev === 0 ? (curr === 0 ? 0 : 100) : +(((curr - prev) / prev) * 100).toFixed(1);
+        const ingresos = current.ingresos, gastos = current.gastos, balance = ingresos - gastos;
+        const prevBalance = previous.ingresos - previous.gastos;
+
+        if (!cancelled) {
+          setState({
+            kpis: {
+              ingresos, gastos, balance,
+              ingresosDelta: pctDelta(ingresos, previous.ingresos),
+              gastosDelta: pctDelta(gastos, previous.gastos),
+              balanceDelta: pctDelta(balance, prevBalance),
+              facturasPorCobrar: 0, facturasPorPagar: 0,
+            },
+            monthlyData: buckets.map(({ mes, ingresos, gastos }) => ({ mes, ingresos, gastos })),
+            rubroDistribution: [],
+            taxData: [],
+          });
+          setIsLive(true);
         }
       } catch (err) {
-        console.warn('useKpiData: using mock data', err.message);
+        console.error('useKpiData:', err.message);
+        if (!cancelled) {
+          setState({
+            kpis: { ingresos: 0, gastos: 0, balance: 0, ingresosDelta: 0, gastosDelta: 0, balanceDelta: 0, facturasPorCobrar: 0, facturasPorPagar: 0 },
+            monthlyData: [], rubroDistribution: [], taxData: [],
+          });
+          setIsLive(false);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-
-      // Fallback to mock
-      setData({
-        kpis: mockKpiData,
-        monthlyData: mockMonthlyData,
-        rubroDistribution: mockRubroDistribution,
-        taxData: mockTaxDeclarations,
-      });
-      setIsLive(false);
-      setLoading(false);
     })();
+
+    return () => { cancelled = true; };
   }, [year, month]);
 
-  return { ...data, loading, isLive };
+  return { ...state, loading, isLive };
 }
 
 // ─── useSatSync ─────────────────────────────────────────────────────────
@@ -461,52 +474,53 @@ export function useAuthStatus() {
 
 // ─── useRetenciones ─────────────────────────────────────────────────────
 /**
- * Fetch retenciones (withholding tax) data.
- * Falls back to mock data if backend unavailable.
+ * El esquema actual de `facturas` no tiene columnas de retención
+ * (isr_retenido/iva_retenido) — no hay nada que consultar. Se devuelve un
+ * estado vacío honesto en vez de datos simulados.
  */
 export function useRetenciones() {
-  const [retenciones, setRetenciones] = useState(mockRetenciones);
+  return { retenciones: [], loading: false, isLive: true };
+}
+
+// ─── useInconsistencias ─────────────────────────────────────────────────
+/**
+ * Lee las inconsistencias (motor de auditoría) de las facturas del usuario
+ * actual. Consulta en dos pasos: primero los ids de sus facturas, luego las
+ * inconsistencias que las referencian — más robusto que depender de que
+ * PostgREST descubra la relación FK para un embedded select.
+ */
+export function useInconsistencias() {
+  const [inconsistencias, setInconsistencias] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [isLive, setIsLive] = useState(false);
+  const [error, setError] = useState(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const backendUp = await checkBackend();
-        if (backendUp) {
-          // Retenciones come from CFDIs with tipo_comprobante that have retenciones
-          const response = await satApi.getCfdis({ limit: 200 });
-          if (response.success && response.data?.invoices?.length > 0) {
-            const withRetenciones = response.data.invoices
-              .filter(inv => (inv.isr_retenido > 0 || inv.iva_retenido > 0))
-              .map((inv, idx) => ({
-                id: String(idx + 1),
-                folio: `RET-${String(idx + 1).padStart(4, '0')}`,
-                receptor: inv.razon_social,
-                rfc: inv.rfc,
-                tipo_retencion: inv.isr_retenido > 0 ? 'ISR Servicios Profesionales' : 'IVA Arrendamiento',
-                fecha: inv.fecha,
-                base: inv.subtotal,
-                tasa: inv.isr_retenido > 0 ? 10 : 10.6667,
-                monto_retenido: inv.isr_retenido || 0,
-                iva_retenido: inv.iva_retenido || 0,
-                total_retenido: (inv.isr_retenido || 0) + (inv.iva_retenido || 0),
-                status: 'timbrada',
-                factura_vinculada: `${inv.serie}${inv.folio}`,
-              }));
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      if (!supabase) throw new Error('Supabase no está configurado.');
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id;
+      if (!userId) { setInconsistencias([]); return; }
 
-            if (withRetenciones.length > 0) {
-              setRetenciones(withRetenciones);
-              setIsLive(true);
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('useRetenciones: using mock data', err.message);
-      }
+      const { data: facturas, error: errF } = await supabase
+        .from('facturas').select('id').eq('user_id', userId);
+      if (errF) throw errF;
+      const ids = (facturas || []).map(f => f.id);
+      if (ids.length === 0) { setInconsistencias([]); return; }
+
+      const { data: incs, error: errI } = await supabase
+        .from('inconsistencias_facturas').select('*').in('factura_id', ids);
+      if (errI) throw errI;
+      setInconsistencias(incs || []);
+    } catch (err) {
+      setError(err.message);
+      setInconsistencias([]);
+    } finally {
       setLoading(false);
-    })();
+    }
   }, []);
 
-  return { retenciones, loading, isLive };
+  useEffect(() => { fetchData(); }, [fetchData]);
+  return { inconsistencias, loading, error, refetch: fetchData };
 }

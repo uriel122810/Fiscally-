@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   TrendingUp, TrendingDown, DollarSign, FileText,
-  AlertCircle, RefreshCw, ArrowUpRight, ArrowDownRight,
+  AlertCircle, AlertTriangle, RefreshCw, ArrowUpRight, ArrowDownRight,
   Loader2, Wifi, WifiOff
 } from 'lucide-react';
 import {
@@ -11,7 +11,7 @@ import {
 import {
   activityFeed, agentStatus, formatCurrency
 } from '../data/mockData';
-import { useKpiData, useSatSync } from '../hooks/useSatData';
+import { useKpiData, useSatSync, useInconsistencias } from '../hooks/useSatData';
 
 // ─── KPI Card ──────────────────────────────────────────────────────────────
 function KPICard({ label, value, delta, currency, icon: Icon, color, iconBg }) {
@@ -32,6 +32,22 @@ function KPICard({ label, value, delta, currency, icon: Icon, color, iconBg }) {
         </span>
         <span className="kpi-meta">vs mes anterior</span>
       </div>
+    </div>
+  );
+}
+
+// ─── Alert Card ────────────────────────────────────────────────────────────
+function AlertCard({ count }) {
+  return (
+    <div className="kpi-card" style={{ '--kpi-color': '#F59E0B', '--kpi-icon-bg': '#FFFBEB' }}>
+      <div className="kpi-label">
+        Alertas de auditoría
+        <div className="kpi-icon-wrap">
+          <AlertTriangle size={15} />
+        </div>
+      </div>
+      <div className="kpi-value">{count}</div>
+      <span className="kpi-meta">{count === 0 ? 'Sin inconsistencias detectadas' : 'Requieren revisión'}</span>
     </div>
   );
 }
@@ -203,6 +219,7 @@ export default function Dashboard({ onNavigate, userEmail }) {
   // ── Use real data hooks ─────────────────────────────────────────────
   const { kpis, monthlyData, rubroDistribution, loading, isLive } = useKpiData(selectedYear, selectedMonth);
   const { syncStatus, progress, error: syncError, startSync, cancelSync } = useSatSync();
+  const { inconsistencias } = useInconsistencias();
 
   const handleSatSync = () => {
     const year = now.getFullYear();
@@ -312,6 +329,7 @@ export default function Dashboard({ onNavigate, userEmail }) {
           color="#6366F1"
           iconBg="#EEF2FF"
         />
+        <AlertCard count={inconsistencias.length} />
       </div>
 
       {/* Charts */}

@@ -41,6 +41,7 @@ export default function BulkImport() {
   const workerRef = useRef(null);
   const inputRef = useRef(null);
   const userIdRef = useRef(null);
+  const companyRfcRef = useRef(null);
   // Contador de generación: al cancelar se incrementa y los lotes en vuelo de
   // la corrida vieja se resuelven sin tocar el estado.
   const runIdRef = useRef(0);
@@ -63,15 +64,31 @@ export default function BulkImport() {
     const userId = userIdRef.current;
 
     // 1. Mapear el lote del worker a las columnas de la tabla `facturas`
+    const companyRfc = companyRfcRef.current;
     const rows = lote.map(inv => ({
       user_id: userId,
       uuid_fiscal: inv.uuid,
       rfc_emisor: inv.rfcEmisor,
       rfc_receptor: inv.rfcReceptor,
+      nombre_emisor: inv.nombreEmisor,
+      nombre_receptor: inv.nombreReceptor,
       total: inv.total,
+      subtotal: inv.subtotal,
       tipo_cfdi: inv.tipoComprobante,
       fecha_emision: inv.fecha,
+      moneda: inv.moneda,
+      serie: inv.serie,
+      folio: inv.folio,
+      forma_pago: inv.formaPago,
+      metodo_pago: inv.metodoPago,
+      // Sin el RFC de la empresa configurado no podemos saber si la factura
+      // es emitida o recibida; se deja null en vez de adivinar.
+      direction: companyRfc
+        ? (inv.rfcEmisor?.toUpperCase().trim() === companyRfc ? 'emitida' : 'recibida')
+        : null,
+      sat_status: 'vigente',
       estado_revision: 'pendiente',
+      source: 'bulk_import',
     }));
 
     // 2. Upsert masivo del lote + .select() para obtener los ids generados
@@ -128,6 +145,12 @@ export default function BulkImport() {
       setErrorMsg('No hay sesión activa; vuelve a iniciar sesión para guardar las facturas.');
       return;
     }
+    const { data: config } = await supabase
+      .from('configuracion_sat')
+      .select('rfc')
+      .eq('user_id', userId)
+      .maybeSingle();
+    companyRfcRef.current = (config?.rfc || '').toUpperCase().trim() || null;
 
     stopWorker();
     userIdRef.current = userId;
@@ -211,6 +234,7 @@ export default function BulkImport() {
     stopWorker();
     saveChainRef.current = Promise.resolve();
     batchCountRef.current = 0;
+    companyRfcRef.current = null;
     setStatus('idle');
     setFileName('');
     setTotalXml(0);

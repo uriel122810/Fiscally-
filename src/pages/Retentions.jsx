@@ -1,5 +1,5 @@
-import { FileText, Download, CheckCircle, Clock, Shield, Wifi, WifiOff } from 'lucide-react';
-import { retenciones as mockRetenciones, formatCurrency, formatDate } from '../data/mockData';
+import { FileText, Download, CheckCircle, Clock, Shield } from 'lucide-react';
+import { formatCurrency, formatDate } from '../data/mockData';
 import { useRetenciones } from '../hooks/useSatData';
 
 function RetStatusBadge({ status }) {
@@ -79,7 +79,13 @@ export default function Retentions() {
             </tr>
           </thead>
           <tbody>
-            {retenciones.map(ret => (
+            {retenciones.length === 0 ? (
+              <tr>
+                <td colSpan={10} style={{ textAlign: 'center', padding: 'var(--sp-8)', color: 'var(--text-tertiary)', fontSize: 'var(--text-sm)' }}>
+                  Aún no hay datos de retenciones — este módulo requiere columnas que no existen en el esquema actual de <code className="mono">facturas</code>.
+                </td>
+              </tr>
+            ) : retenciones.map(ret => (
               <tr key={ret.id} className="table-row">
                 <td>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

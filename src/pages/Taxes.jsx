@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Download, Calendar, AlertCircle, CheckCircle, Clock, XCircle, Wifi, WifiOff } from 'lucide-react';
-import { formatCurrency, monthlyData as fallbackMonthlyData, taxDeclarations as fallbackTaxDeclarations } from '../data/mockData';
+import { Download, Calendar, AlertCircle, CheckCircle, Clock, XCircle } from 'lucide-react';
+import { formatCurrency } from '../data/mockData';
 import { useKpiData } from '../hooks/useSatData';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -20,12 +20,6 @@ function DeclarationStatusBadge({ status }) {
   );
 }
 
-const barDataFallback = fallbackMonthlyData.map(m => ({
-  mes: m.mes,
-  ISR: Math.round(m.ingresos * 0.01),
-  IVA: Math.round((m.ingresos - m.gastos) * 0.016),
-}));
-
 function BarTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   return (
@@ -44,17 +38,14 @@ function BarTooltip({ active, payload, label }) {
 export default function Taxes() {
   const [activeYear, setActiveYear] = useState(2026);
 
-  // ── Use real tax data from SAT ──────────────────────────────────────
-  const { taxData: liveTaxData, monthlyData: liveMonthlyData, isLive } = useKpiData(activeYear, new Date().getMonth() + 1);
+  // ── Use real tax data from Supabase ─────────────────────────────────
+  const { taxData: taxDeclarations, monthlyData } = useKpiData(activeYear, new Date().getMonth() + 1);
 
-  const taxDeclarations = isLive ? liveTaxData : fallbackTaxDeclarations;
-  const barData = isLive
-    ? (liveMonthlyData || []).map(m => ({
-        mes: m.mes,
-        ISR: Math.round((m.ingresos - m.gastos) * 0.03),
-        IVA: Math.round((m.ingresos - m.gastos) * 0.016),
-      }))
-    : barDataFallback;
+  const barData = (monthlyData || []).map(m => ({
+    mes: m.mes,
+    ISR: Math.round((m.ingresos - m.gastos) * 0.03),
+    IVA: Math.round((m.ingresos - m.gastos) * 0.016),
+  }));
 
   const nextDeadline = taxDeclarations.find(d => d.status === 'pendiente');
   const daysLeft = nextDeadline
@@ -141,6 +132,11 @@ export default function Taxes() {
           </button>
         </div>
         <div style={{ padding: 'var(--sp-2)' }}>
+          {taxDeclarations.length === 0 && (
+            <div style={{ textAlign: 'center', padding: 'var(--sp-8)', color: 'var(--text-tertiary)', fontSize: 'var(--text-sm)' }}>
+              Aún no hay declaraciones registradas — este módulo requiere datos que no se están capturando actualmente.
+            </div>
+          )}
           {taxDeclarations.map((decl, i) => (
             <div
               key={i}
