@@ -13,6 +13,7 @@ import Agents from './pages/Agents';
 import Purchases from './pages/Purchases';
 import Retail from './pages/Retail';
 import Imports from './pages/Imports';
+import BulkImport from './pages/BulkImport';
 import Retentions from './pages/Retentions';
 import Settings from './pages/Settings';
 import ChatWidget from './components/ChatWidget';
@@ -21,6 +22,7 @@ import { Loader2 } from 'lucide-react';
 const pages = {
   dashboard: Dashboard,
   invoices: Invoices,
+  bulkImport: BulkImport,
   receipts: Receipts,
   banks: Banks,
   taxes: Taxes,

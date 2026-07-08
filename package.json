@@ -14,6 +14,7 @@
     "@nodecfdi/credentials": "^2.0.3",
     "@nodecfdi/sat-ws-descarga-masiva": "^2.0.0",
     "@supabase/supabase-js": "^2.108.2",
+    "@zip.js/zip.js": "^2.8.26",
     "lambda-multipart-parser": "^1.0.1",
     "lucide-react": "^1.18.0",
     "react": "^19.2.6",

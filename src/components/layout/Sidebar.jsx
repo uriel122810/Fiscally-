@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard, FileText, Receipt, Building2,
+  LayoutDashboard, FileText, FileArchive, Receipt, Building2,
   Calculator, Sparkles, ShoppingCart, ShoppingBag,
   Globe, Shield, Settings, ChevronRight
 } from 'lucide-react';
@@ -7,6 +7,7 @@ import {
 const navItems = [
   { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard },
   { id: 'invoices', label: 'Facturas', icon: FileText },
+  { id: 'bulkImport', label: 'Carga Masiva', icon: FileArchive },
   { id: 'receipts', label: 'Recibos de Pago', icon: Receipt },
   { id: 'banks', label: 'Bancos', icon: Building2 },
   { id: 'taxes', label: 'Impuestos', icon: Calculator },

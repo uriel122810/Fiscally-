@@ -6,6 +6,7 @@ import { notifications } from '../../data/mockData';
 const pageTitles = {
   dashboard: { title: 'Inicio', sub: 'Junio 2026' },
   invoices:  { title: 'Facturas', sub: 'Comprobantes fiscales CFDI' },
+  bulkImport:{ title: 'Carga Masiva', sub: 'Importación de CFDI desde ZIP' },
   receipts:  { title: 'Recibos de Pago', sub: 'Complementos de pago' },
   banks:     { title: 'Bancos', sub: 'Cuentas y conciliación bancaria' },
   taxes:     { title: 'Impuestos', sub: 'Declaraciones y obligaciones fiscales' },
