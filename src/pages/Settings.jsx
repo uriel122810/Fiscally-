@@ -671,6 +671,22 @@ export default function Settings({ userRole, companyLogo, onUpdateLogo }) {
                       </div>
                     )}
 
+                    {!isAdmin && (
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 'var(--sp-3)',
+                        padding: 'var(--sp-3) var(--sp-4)', marginTop: 'var(--sp-5)',
+                        background: 'var(--warning-bg)', border: '1px solid var(--warning-border)',
+                        borderRadius: 'var(--radius-md)',
+                      }}>
+                        <AlertCircle size={16} style={{ color: 'var(--warning-text)', flexShrink: 0 }} />
+                        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--warning-text)' }}>
+                          Solo un administrador puede subir o actualizar el certificado SAT (.cer/.key).
+                          Tu rol actual es <strong>{userRole || 'usuario'}</strong>. Pide a un administrador
+                          que actualice tu rol en la tabla <code className="mono">perfiles</code> si deberías tener acceso.
+                        </div>
+                      </div>
+                    )}
+
                     <div style={{ marginTop: 'var(--sp-5)', display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
                       <button
                         className="btn btn-primary"

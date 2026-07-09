@@ -31,15 +31,24 @@ export default function Auth() {
         // El onAuthStateChange en App.jsx lo atrapará y redirigirá automáticamente.
       } else {
         // FLUJO DE REGISTRO
-        const { error } = await supabase.auth.signUp({ 
-          email, 
-          password 
+        // El rol ('usuario' por defecto) se asigna en public.perfiles vía
+        // trigger de base de datos (on_auth_user_created) — no aquí.
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password
         });
-        
+
         if (error) throw error;
-        
-        // Registro exitoso
-        setSuccessMsg("¡Registro exitoso! Iniciando sesión...");
+
+        // Si el proyecto tiene confirmación de correo activada, signUp()
+        // no crea sesión todavía (data.session es null) — el mensaje debe
+        // reflejar eso en vez de prometer un inicio de sesión que no ocurrió.
+        if (data.session) {
+          setSuccessMsg("¡Registro exitoso! Iniciando sesión...");
+        } else {
+          setSuccessMsg("¡Registro exitoso! Revisa tu correo para confirmar tu cuenta antes de iniciar sesión.");
+          setEsLogin(true);
+        }
         // Limpiamos los inputs
         setEmail("");
         setPassword("");
@@ -174,7 +183,7 @@ export default function Auth() {
                   placeholder={esLogin ? "••••••••" : "Mínimo 6 caracteres"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  minLength={6}
+                  minLength={esLogin ? undefined : 6}
                 />
               </div>
             </div>
